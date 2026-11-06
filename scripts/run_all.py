@@ -51,6 +51,10 @@ def main():
                     help="min fraction of the oriT profile a hit must cover (default: 0.7)")
     ap.add_argument("--orit-max-evalue", type=float, default=0.01,
                     help="max E-value for oriT hits (default: 0.01)")
+    ap.add_argument("--min-evidence", type=int, default=2,
+                    help="min evidence count (of 4) for ice_candidates.tsv (default: 2)")
+    ap.add_argument("--gc-flank", type=int, default=35000,
+                    help="bp up- and downstream used for flank GC (default: 35000)")
     ap.add_argument("--gc-z", type=float, default=2.0,
                     help="|GC z-score| counted as atypical GC (default: 2)")
     args = ap.parse_args()
@@ -93,9 +97,11 @@ def main():
         logs / "summarize_orit.log")
 
     run([py, SCRIPTS / "gc_content.py", "--regions", out / "regions" / "regions.tsv",
-         "--fasta-list", fasta_list, "-o", out / "gc"], logs / "gc_content.log")
+         "--fasta-list", fasta_list, "-o", out / "gc", "--flank", args.gc_flank],
+        logs / "gc_content.log")
 
-    run([py, SCRIPTS / "build_table.py", "--results", out, "--gc-z", args.gc_z],
+    run([py, SCRIPTS / "build_table.py", "--results", out, "--gc-z", args.gc_z,
+         "--min-evidence", args.min_evidence],
         logs / "build_table.log")
 
     print((logs / "build_table.log").read_text().strip())

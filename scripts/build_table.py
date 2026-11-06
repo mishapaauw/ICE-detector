@@ -20,8 +20,10 @@ confidence (ICE only):
 
 Outputs (in --outdir):
   all_regions.tsv     every region with all evidence columns
-  ice_candidates.tsv  ICE rows only, sorted by confidence
-  ice_fasta/          FASTA of each ICE region (copied from regions/fasta)
+  ice_candidates.tsv  regions with evidence_count >= --min-evidence (default 2),
+                      any category (ICEs and e.g. IMEs), sorted by category,
+                      confidence and evidence
+  ice_fasta/          FASTA of each candidate region (copied from regions/fasta)
   versions.txt        settings + versions.txt of every upstream step
 """
 import argparse
@@ -59,6 +61,8 @@ def main():
     ap.add_argument("--results", required=True,
                     help="run folder containing ppanggolin/, regions/, conjugation/, orit/, gc/")
     ap.add_argument("-o", "--outdir", help="default: <results>/final")
+    ap.add_argument("--min-evidence", type=int, default=2,
+                    help="min evidence_count for ice_candidates.tsv (default: 2)")
     ap.add_argument("--gc-z", type=float, default=2.0,
                     help="|GC z-score| at or above which GC counts as atypical (default: 2)")
     args = ap.parse_args()
@@ -94,7 +98,8 @@ def main():
             "t4ss", "relaxase", "orit", "gc_atypical",
             "conj_systems", "dconj_systems", "relaxase_types", "t4cp", "virb4",
             "orit_profiles", "orit_best_evalue", "region_gc", "genome_gc", "gc_diff",
-            "gc_zscore", "coordinates", "contig_border"]
+            "gc_zscore", "flank_up_gc", "flank_down_gc", "flank_gc", "gc_diff_flank",
+            "coordinates", "contig_border"]
     df = df[cols].sort_values(
         ["category", "confidence", "evidence_count", "genome", "start"],
         key=lambda s: s.map(CONF_ORDER) if s.name == "confidence"
@@ -103,7 +108,7 @@ def main():
         ascending=[True, True, False, True, True])
     df.to_csv(out / "all_regions.tsv", sep="\t", index=False)
 
-    ice = df[df["category"] == "ICE"]
+    ice = df[df["evidence_count"] >= args.min_evidence]
     ice.to_csv(out / "ice_candidates.tsv", sep="\t", index=False)
     fasta_out = out / "ice_fasta"
     if fasta_out.exists():
@@ -115,7 +120,7 @@ def main():
     with open(out / "versions.txt", "w") as fh:
         fh.write(f"date: {datetime.now(timezone.utc):%Y-%m-%dT%H:%M:%SZ}\n"
                  f"python: {sys.version.split()[0]}\npandas: {pd.__version__}\n"
-                 f"gc_z: {args.gc_z}\n")
+                 f"gc_z: {args.gc_z}\nmin_evidence: {args.min_evidence}\n")
         for step in ("ppanggolin", "regions", "conjugation", "orit", "gc"):
             v = res / step / "versions.txt"
             if v.exists():
@@ -126,8 +131,11 @@ def main():
 
     print(f"{len(df)} regions: " + ", ".join(
         f"{k}={v}" for k, v in df["category"].value_counts().items()))
-    print(f"ICE confidence: " + (", ".join(
-        f"{k}={v}" for k, v in ice["confidence"].value_counts().items()) or "none"))
+    ices = df[df["category"] == "ICE"]
+    print("ICE confidence: " + (", ".join(
+        f"{k}={v}" for k, v in ices["confidence"].value_counts().items()) or "none"))
+    print(f"candidates (evidence >= {args.min_evidence}): {len(ice)} (" + ", ".join(
+        f"{k}={v}" for k, v in ice["category"].value_counts().items()) + ")")
     print(f"-> {out / 'ice_candidates.tsv'}, {out / 'all_regions.tsv'}, {fasta_out}/")
 
 
