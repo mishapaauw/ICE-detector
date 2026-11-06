@@ -1,0 +1,9 @@
+# generated outputs
+results/
+logs/
+db/
+# OS / python clutter
+.DS_Store
+__pycache__/
+*.pyc
+.pytest_cache/
