@@ -9,7 +9,9 @@ Steps (each writes its own subfolder with versions.txt):
     2. ppanggolin/          (run_ppanggolin.sh)
     3. regions/             (extract_regions.py)
     4. conjugation/         (detect_conjugation.sh + summarize_conjugation.py)
-Later milestones add oriT, GC and the final table.
+    5. orit/                (detect_orit.sh + summarize_orit.py)
+    6. gc/                  (gc_content.py)
+Reference data must be in db/ first (see db/README.md).
 """
 import argparse
 import subprocess
@@ -41,6 +43,13 @@ def main():
                     help="reuse existing <outdir>/conjugation/macsyfinder results")
     ap.add_argument("--models-dir", default=str(SCRIPTS.parent / "db" / "macsy_models"),
                     help="folder containing the CONJScan model package")
+    ap.add_argument("--skip-nhmmscan", action="store_true",
+                    help="reuse existing <outdir>/orit/nhmmscan results")
+    ap.add_argument("--orit-hmm", default=str(SCRIPTS.parent / "db" / "orit" / "oriT.hmm"))
+    ap.add_argument("--orit-min-cov", type=float, default=0.7,
+                    help="min fraction of the oriT profile a hit must cover (default: 0.7)")
+    ap.add_argument("--orit-max-evalue", type=float, default=0.01,
+                    help="max E-value for oriT hits (default: 0.01)")
     args = ap.parse_args()
 
     out = Path(args.outdir)
@@ -71,7 +80,19 @@ def main():
          "--tables", out / "ppanggolin" / "table", "--macsyfinder", conj / "macsyfinder",
          "-o", conj], logs / "summarize_conjugation.log")
 
-    print(f"[run_all] done: {out}/regions/regions.tsv, {conj}/conjugation.tsv")
+    orit = out / "orit"
+    if not args.skip_nhmmscan:
+        run(["bash", SCRIPTS / "detect_orit.sh", fasta_list, orit, args.cpu, args.orit_hmm],
+            logs / "detect_orit.log")
+    run([py, SCRIPTS / "summarize_orit.py", "--regions", out / "regions" / "regions.tsv",
+         "--nhmmscan", orit / "nhmmscan", "--hmm", args.orit_hmm, "-o", orit,
+         "--min-cov", args.orit_min_cov, "--max-evalue", args.orit_max_evalue],
+        logs / "summarize_orit.log")
+
+    run([py, SCRIPTS / "gc_content.py", "--regions", out / "regions" / "regions.tsv",
+         "--fasta-list", fasta_list, "-o", out / "gc"], logs / "gc_content.log")
+
+    print(f"[run_all] done: {out}/{{regions,conjugation,orit,gc}}")
 
 
 if __name__ == "__main__":
