@@ -8,7 +8,8 @@ Steps (each writes its own subfolder with versions.txt):
     1. genomes.fasta.list  (make_fasta_list.py)
     2. ppanggolin/          (run_ppanggolin.sh)
     3. regions/             (extract_regions.py)
-Later milestones add conjugation, oriT, GC and the final table.
+    4. conjugation/         (detect_conjugation.sh + summarize_conjugation.py)
+Later milestones add oriT, GC and the final table.
 """
 import argparse
 import subprocess
@@ -36,6 +37,10 @@ def main():
     ap.add_argument("--linear", action="store_true", help="treat contigs as linear")
     ap.add_argument("--skip-ppanggolin", action="store_true",
                     help="reuse an existing <outdir>/ppanggolin")
+    ap.add_argument("--skip-macsyfinder", action="store_true",
+                    help="reuse existing <outdir>/conjugation/macsyfinder results")
+    ap.add_argument("--models-dir", default=str(SCRIPTS.parent / "db" / "macsy_models"),
+                    help="folder containing the CONJScan model package")
     args = ap.parse_args()
 
     out = Path(args.outdir)
@@ -57,7 +62,16 @@ def main():
          "--fasta-list", fasta_list, "-o", out / "regions", "--min-orfs", args.min_orfs],
         logs / "extract_regions.log")
 
-    print(f"[run_all] done: {out}/regions/regions.tsv")
+    conj = out / "conjugation"
+    if not args.skip_macsyfinder:
+        run(["bash", SCRIPTS / "detect_conjugation.sh", out / "ppanggolin", conj, args.cpu,
+             args.models_dir, "linear" if args.linear else "circular"],
+            logs / "detect_conjugation.log")
+    run([py, SCRIPTS / "summarize_conjugation.py", "--regions", out / "regions" / "regions.tsv",
+         "--tables", out / "ppanggolin" / "table", "--macsyfinder", conj / "macsyfinder",
+         "-o", conj], logs / "summarize_conjugation.log")
+
+    print(f"[run_all] done: {out}/regions/regions.tsv, {conj}/conjugation.tsv")
 
 
 if __name__ == "__main__":

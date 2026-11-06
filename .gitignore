@@ -1,7 +1,8 @@
 # generated outputs
 results/
 logs/
-db/
+db/*
+!db/README.md
 # OS / python clutter
 .DS_Store
 __pycache__/
