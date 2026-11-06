@@ -1,0 +1,7 @@
+# Parameters passed to `ppanggolin all --config`. Only non-default or
+# reproducibility-relevant values are set here; everything else uses
+# PPanGGOLiN defaults (see `ppanggolin utils --default_config all`).
+partition:
+  seed: 42
+rarefaction:
+  seed: 42
