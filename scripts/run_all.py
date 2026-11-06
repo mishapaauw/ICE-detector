@@ -11,6 +11,7 @@ Steps (each writes its own subfolder with versions.txt):
     4. conjugation/         (detect_conjugation.sh + summarize_conjugation.py)
     5. orit/                (detect_orit.sh + summarize_orit.py)
     6. gc/                  (gc_content.py)
+    7. final/               (build_table.py): ice_candidates.tsv, all_regions.tsv, ice_fasta/
 Reference data must be in db/ first (see db/README.md).
 """
 import argparse
@@ -50,6 +51,8 @@ def main():
                     help="min fraction of the oriT profile a hit must cover (default: 0.7)")
     ap.add_argument("--orit-max-evalue", type=float, default=0.01,
                     help="max E-value for oriT hits (default: 0.01)")
+    ap.add_argument("--gc-z", type=float, default=2.0,
+                    help="|GC z-score| counted as atypical GC (default: 2)")
     args = ap.parse_args()
 
     out = Path(args.outdir)
@@ -92,7 +95,11 @@ def main():
     run([py, SCRIPTS / "gc_content.py", "--regions", out / "regions" / "regions.tsv",
          "--fasta-list", fasta_list, "-o", out / "gc"], logs / "gc_content.log")
 
-    print(f"[run_all] done: {out}/{{regions,conjugation,orit,gc}}")
+    run([py, SCRIPTS / "build_table.py", "--results", out, "--gc-z", args.gc_z],
+        logs / "build_table.log")
+
+    print((logs / "build_table.log").read_text().strip())
+    print(f"[run_all] done: {out}/final/ice_candidates.tsv")
 
 
 if __name__ == "__main__":
