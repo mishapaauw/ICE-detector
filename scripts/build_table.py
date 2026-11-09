@@ -6,7 +6,8 @@ Per region (RGP with >= --min-orfs genes), evidence is:
   relaxase   MOB relaxase gene in the region
   orit       oriT hit passing the E-value and profile-coverage filters
   gc         atypical GC: |gc_zscore| >= --gc-z (default 2)
-evidence_count = number of these four that are True.
+  dr         direct repeats (putative attL/attR) found at both region ends
+evidence_count = number of these five that are True.
 
 category:
   ICE           t4ss (Cury et al. 2017: spots encoding a conjugative system)
@@ -20,10 +21,14 @@ confidence (ICE only):
 
 Outputs (in --outdir):
   all_regions.tsv     every region with all evidence columns
-  ice_candidates.tsv  regions with evidence_count >= --min-evidence (default 2),
-                      any category (ICEs and e.g. IMEs), sorted by category,
+  ice_candidates.tsv  regions with evidence_count >= --min-evidence (default 2)
+                      AND at least one mobility marker (t4ss, relaxase or orit),
+                      so ICEs and IME candidates, but not e.g. prophages that
+                      only have atypical GC + DRs. Sorted by category,
                       confidence and evidence
   ice_fasta/          FASTA of each candidate region (copied from regions/fasta)
+element_start/element_end: outer edges of the DR pair, when found; a refined
+estimate of the element boundaries (region start/end come from PPanGGOLiN).
   versions.txt        settings + versions.txt of every upstream step
 """
 import argparse
@@ -75,18 +80,24 @@ def main():
     conj = pd.read_csv(res / "conjugation" / "conjugation.tsv", sep="\t")
     orit = pd.read_csv(res / "orit" / "orit.tsv", sep="\t")
     gc = pd.read_csv(res / "gc" / "gc.tsv", sep="\t")
+    dr = pd.read_csv(res / "dr" / "dr.tsv", sep="\t")
 
     df = (regions.merge(conj, on="region_id", how="left", validate="1:1")
                  .merge(orit, on="region_id", how="left", validate="1:1")
-                 .merge(gc, on="region_id", how="left", validate="1:1"))
+                 .merge(gc, on="region_id", how="left", validate="1:1")
+                 .merge(dr, on="region_id", how="left", validate="1:1"))
     if len(df) != len(regions):
         sys.exit("Region tables do not match; re-run upstream steps.")
 
     df = df.rename(columns={"conj_system": "t4ss"})
-    for col in ("t4ss", "dconj_system", "relaxase", "orit", "t4cp", "virb4"):
+    for col in ("t4ss", "dconj_system", "relaxase", "orit", "t4cp", "virb4", "dr"):
         df[col] = df[col].fillna(False).astype(bool)
     df["gc_atypical"] = df["gc_zscore"].abs() >= args.gc_z
-    df["evidence_count"] = df[["t4ss", "relaxase", "orit", "gc_atypical"]].sum(axis=1)
+    df["evidence_count"] = df[["t4ss", "relaxase", "orit", "gc_atypical", "dr"]].sum(axis=1)
+    for col in ("dr_length", "dr_genome_copies", "dr_left_offset", "dr_right_offset",
+                "dr_left_start", "dr_left_end", "dr_right_start", "dr_right_end",
+                "element_start", "element_end"):
+        df[col] = df[col].astype("Int64")
     df[["category", "confidence"]] = df.apply(lambda r: pd.Series(classify(r)), axis=1)
     df = df.join(spot_genome_counts(res / "ppanggolin" / "spots.tsv",
                                     res / "ppanggolin" / "regions_of_genomic_plasticity.tsv"),
@@ -95,10 +106,13 @@ def main():
 
     cols = ["region_id", "genome", "contig", "start", "end", "length", "n_orfs",
             "spot_id", "spot_n_genomes", "category", "confidence", "evidence_count",
-            "t4ss", "relaxase", "orit", "gc_atypical",
+            "t4ss", "relaxase", "orit", "gc_atypical", "dr",
+            "element_start", "element_end",
             "conj_systems", "dconj_systems", "relaxase_types", "t4cp", "virb4",
             "orit_profiles", "orit_best_evalue", "region_gc", "genome_gc", "gc_diff",
             "gc_zscore", "flank_up_gc", "flank_down_gc", "flank_gc", "gc_diff_flank",
+            "dr_length", "dr_seq", "dr_genome_copies", "dr_left_start", "dr_left_end",
+            "dr_right_start", "dr_right_end", "dr_left_offset", "dr_right_offset",
             "coordinates", "contig_border"]
     df = df[cols].sort_values(
         ["category", "confidence", "evidence_count", "genome", "start"],
@@ -108,7 +122,8 @@ def main():
         ascending=[True, True, False, True, True])
     df.to_csv(out / "all_regions.tsv", sep="\t", index=False)
 
-    ice = df[df["evidence_count"] >= args.min_evidence]
+    mobility = df["t4ss"] | df["relaxase"] | df["orit"]
+    ice = df[(df["evidence_count"] >= args.min_evidence) & mobility]
     ice.to_csv(out / "ice_candidates.tsv", sep="\t", index=False)
     fasta_out = out / "ice_fasta"
     if fasta_out.exists():
@@ -121,7 +136,7 @@ def main():
         fh.write(f"date: {datetime.now(timezone.utc):%Y-%m-%dT%H:%M:%SZ}\n"
                  f"python: {sys.version.split()[0]}\npandas: {pd.__version__}\n"
                  f"gc_z: {args.gc_z}\nmin_evidence: {args.min_evidence}\n")
-        for step in ("ppanggolin", "regions", "conjugation", "orit", "gc"):
+        for step in ("ppanggolin", "regions", "conjugation", "orit", "gc", "dr"):
             v = res / step / "versions.txt"
             if v.exists():
                 fh.write(f"\n## {step}\n{v.read_text()}")
@@ -134,7 +149,7 @@ def main():
     ices = df[df["category"] == "ICE"]
     print("ICE confidence: " + (", ".join(
         f"{k}={v}" for k, v in ices["confidence"].value_counts().items()) or "none"))
-    print(f"candidates (evidence >= {args.min_evidence}): {len(ice)} (" + ", ".join(
+    print(f"candidates (evidence >= {args.min_evidence} + mobility marker): {len(ice)} (" + ", ".join(
         f"{k}={v}" for k, v in ice["category"].value_counts().items()) + ")")
     print(f"-> {out / 'ice_candidates.tsv'}, {out / 'all_regions.tsv'}, {fasta_out}/")
 

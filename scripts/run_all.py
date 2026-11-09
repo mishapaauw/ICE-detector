@@ -11,6 +11,7 @@ Steps (each writes its own subfolder with versions.txt):
     4. conjugation/         (detect_conjugation.sh + summarize_conjugation.py)
     5. orit/                (detect_orit.sh + summarize_orit.py)
     6. gc/                  (gc_content.py)
+    6b. dr/                 (direct_repeats.py)
     7. final/               (build_table.py): ice_candidates.tsv, all_regions.tsv, ice_fasta/
 Reference data must be in db/ first (see db/README.md).
 """
@@ -52,7 +53,15 @@ def main():
     ap.add_argument("--orit-max-evalue", type=float, default=0.01,
                     help="max E-value for oriT hits (default: 0.01)")
     ap.add_argument("--min-evidence", type=int, default=2,
-                    help="min evidence count (of 4) for ice_candidates.tsv (default: 2)")
+                    help="min evidence count (of 5) for ice_candidates.tsv (default: 2)")
+    ap.add_argument("--dr-outside", type=int, default=3000,
+                    help="bp searched for direct repeats outside each region end (default: 3000)")
+    ap.add_argument("--dr-inside", type=int, default=3000,
+                    help="bp searched for direct repeats inside each region end (default: 3000)")
+    ap.add_argument("--dr-min-len", type=int, default=18,
+                    help="minimum direct repeat length (default: 18)")
+    ap.add_argument("--dr-max-copies", type=int, default=2,
+                    help="max genome-wide copies of a direct repeat (default: 2)")
     ap.add_argument("--gc-flank", type=int, default=35000,
                     help="bp up- and downstream used for flank GC (default: 35000)")
     ap.add_argument("--gc-z", type=float, default=2.0,
@@ -99,6 +108,11 @@ def main():
     run([py, SCRIPTS / "gc_content.py", "--regions", out / "regions" / "regions.tsv",
          "--fasta-list", fasta_list, "-o", out / "gc", "--flank", args.gc_flank],
         logs / "gc_content.log")
+
+    run([py, SCRIPTS / "direct_repeats.py", "--regions", out / "regions" / "regions.tsv",
+         "--fasta-list", fasta_list, "-o", out / "dr", "--outside", args.dr_outside,
+         "--inside", args.dr_inside, "--min-len", args.dr_min_len,
+         "--max-copies", args.dr_max_copies], logs / "direct_repeats.log")
 
     run([py, SCRIPTS / "build_table.py", "--results", out, "--gc-z", args.gc_z,
          "--min-evidence", args.min_evidence],

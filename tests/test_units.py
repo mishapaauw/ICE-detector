@@ -118,3 +118,66 @@ def test_window_gc():
 def test_classify(t4ss, relaxase, orit, dconj, expected):
     row = {"t4ss": t4ss, "relaxase": relaxase, "orit": orit, "dconj_system": dconj}
     assert build_table.classify(row) == expected
+
+
+# --- direct_repeats -------------------------------------------------------------------
+
+import argparse
+import random
+
+import direct_repeats
+
+
+def random_dna(n, seed):
+    rng = random.Random(seed)
+    return "".join(rng.choice("ACGT") for _ in range(n))
+
+
+def test_maximal_matches_extends_to_full_length():
+    a = "TTTT" + "ACGTGCATGCAAGT" + "CCCC"
+    b = "GGGG" + "ACGTGCATGCAAGT" + "AAAA"
+    assert direct_repeats.maximal_matches(a, b, 10) == [(14, 4, 4)]
+
+
+def test_low_complexity():
+    assert direct_repeats.low_complexity("AT" * 10)
+    assert not direct_repeats.low_complexity("ACGTGCATGCAAGTCCGA")
+
+
+def test_find_dr_in_flanks_of_inserted_element():
+    """Simulated integration: att copy before and after a 5 kb element."""
+    att = "GCTCAGTTGGTAGAGCGCAACC"                       # 22 bp
+    left, element, right = random_dna(10000, 1), random_dna(5000, 2), random_dna(10000, 3)
+    genome = left + att + element + att + right
+    start = len(left) + len(att) + 1                     # element (region) start, 1-based
+    end = start + len(element) - 1
+    args = argparse.Namespace(outside=3000, inside=3000, min_len=18, max_copies=2)
+    res = direct_repeats.find_dr(genome, [genome], start, end, args, circular=False)
+    assert res["dr"] and res["dr_length"] >= len(att)
+    assert res["dr_left_offset"] < 0 and res["dr_right_offset"] < 0   # both copies outside
+    assert res["element_start"] <= start - len(att) + 1
+
+
+def test_find_dr_rejects_genome_wide_repeat():
+    """A repeat with a third copy elsewhere (e.g. REP element) is not a DR."""
+    att = "GCTCAGTTGGTAGAGCGCAACC"
+    left, element, right = random_dna(10000, 1), random_dna(5000, 2), random_dna(10000, 3)
+    genome = left + att + element + att + right + att
+    start = len(left) + len(att) + 1
+    end = start + len(element) - 1
+    args = argparse.Namespace(outside=3000, inside=3000, min_len=18, max_copies=2)
+    assert not direct_repeats.find_dr(genome, [genome], start, end, args, circular=False)["dr"]
+
+
+def test_find_dr_wraps_circular_contig():
+    """Right att copy split across the origin: found only if the contig is circular."""
+    att = "GCTCAGTTGGTAGAGCGCAACC"
+    left, element, right = random_dna(10000, 1), random_dna(5000, 2), random_dna(1000, 3)
+    linear = left + att + element + att + right
+    cut = len(left) + len(att) + len(element) + 10      # inside the second att copy
+    genome = linear[cut:] + linear[:cut]                 # rotate the circular contig
+    start = genome.find(element) + 1
+    end = start + len(element) - 1
+    args = argparse.Namespace(outside=3000, inside=3000, min_len=18, max_copies=2)
+    assert direct_repeats.find_dr(genome, [genome], start, end, args, circular=True)["dr"]
+    assert not direct_repeats.find_dr(genome, [genome], start, end, args, circular=False)["dr"]
