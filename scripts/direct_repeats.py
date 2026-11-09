@@ -27,7 +27,6 @@ Output (in --outdir): dr.tsv, one row per region; versions.txt
 """
 import argparse
 import csv
-import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -73,18 +72,58 @@ def low_complexity(s):
     return len(trimers) < 0.5 * (len(s) - 2)
 
 
+TRIMS = [(i, j) for i in range(3) for j in range(3)]   # bp trimmed from (left, right)
+
+
+def find_all(pattern, text):
+    """Start positions of pattern in text, overlapping allowed (fast C-level search)."""
+    hits, pos = [], text.find(pattern)
+    while pos != -1:
+        hits.append(pos)
+        pos = text.find(pattern, pos + 1)
+    return hits
+
+
+def trim_counts(pattern, contigs):
+    """Copies of every 0-2 bp per-end trim of pattern, on the forward strand.
+
+    Searches only for the core (pattern minus 2 bp per end), then checks the
+    bases around each core hit, so one genome scan covers all 9 trims.
+    """
+    n = len(pattern)
+    core = pattern[2:n - 2]
+    counts = dict.fromkeys(TRIMS, 0)
+    for c in contigs:
+        for h in find_all(core, c):
+            start = h - 2                       # where the untrimmed pattern would start
+            for i, j in TRIMS:
+                a, b = start + i, start + n - j
+                if a >= 0 and b <= len(c) and c[a:b] == pattern[i:n - j]:
+                    counts[(i, j)] += 1
+    return counts
+
+
 def dr_copies(seq, contigs):
     """(copies of seq, max copies of seq trimmed by up to 2 bp per end), both strands."""
-    trimmed = {seq[i:len(seq) - j] for i in range(3) for j in range(3)} - {seq}
-    return count_copies(seq, contigs), max(count_copies(v, contigs) for v in trimmed)
+    n = len(seq)
+    fwd = trim_counts(seq, contigs)
+    rev = trim_counts(reverse_complement(seq), contigs)
+    total = {}
+    for i, j in TRIMS:
+        v = seq[i:n - j]
+        # trimming i bp left / j bp right of seq = trimming j left / i right of its rc;
+        # a reverse-palindromic variant is found on both strands at once: count it once
+        total[(i, j)] = fwd[(i, j)] + (0 if reverse_complement(v) == v else rev[(j, i)])
+    exact = total[(0, 0)]
+    trimmed = max(v for k, v in total.items() if k != (0, 0))
+    return exact, trimmed
 
 
 def count_copies(seq, contigs):
     """Occurrences (overlapping allowed) on both strands of all contigs."""
-    pat = re.compile(f"(?=({re.escape(seq)}))")
     rc = reverse_complement(seq)
-    pats = [pat] if rc == seq else [pat, re.compile(f"(?=({re.escape(rc)}))")]
-    return sum(len(p.findall(c)) for c in contigs for p in pats)
+    strands = [seq] if rc == seq else [seq, rc]
+    return sum(len(find_all(x, c)) for c in contigs for x in strands)
 
 
 def find_dr(contig_seq, all_contigs, start, end, args, circular):

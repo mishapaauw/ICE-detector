@@ -35,7 +35,13 @@ Approach (after Cury et al. 2017 and Ares-Arroyo et al. 2026; see [References](#
    | `dICE` (decayed ICE) | yes | yes | decayed (CONJScan dCONJ model) |
    | `IME` | yes | yes | none |
    | `iOriT` | yes | no | none |
-   | `other` | any other combination; see `mobility_genes` | | |
+   | `ICE_noOriT` | not found | yes | complete |
+   | `dICE_noOriT` | not found | yes | decayed |
+   | `IME_noOriT` | not found | yes | none |
+   | `other` | any other combination (e.g. conjugation system without relaxase); see `mobility_genes` | | |
+
+   The `_noOriT` categories exist because the oriT profiles only cover known oriT
+   families: many real ICEs and IMEs will have an oriT that is not detected.
    | `none` | no | no | none |
 
 Plasmids are out of scope; identify them separately (e.g. with geNomad).
@@ -92,7 +98,7 @@ Key columns:
 |---|---|
 | `genome`, `contig`, `start`, `end`, `length`, `n_orfs` | location of the region |
 | `spot_id`, `spot_n_genomes` | PPanGGOLiN spot, and how many genomes have a region in it (spot labels change between runs; compare runs on `region_id`) |
-| `category` | `ICE`, `dICE`, `IME`, `iOriT`, `other`, `none` (see table above) |
+| `category` | `ICE`, `dICE`, `IME`, `iOriT`, `ICE_noOriT`, `dICE_noOriT`, `IME_noOriT`, `other`, `none` (see table above) |
 | `mobility_genes` | what was found, joined by `+`: `T4SS`, `dCONJ`, `MOB` (relaxase), `oriT`; e.g. `T4SS+MOB` = ICE without a detected oriT |
 | `evidence_count` | number of: `t4ss`, `relaxase`, `orit`, `gc_atypical`, `dr` |
 | `element_start`, `element_end` | outer edges of the DR pair (refined boundaries), if a DR was found |
@@ -109,7 +115,7 @@ Intermediate results are kept per step: `ppanggolin/`, `regions/` (per-region FA
 
 ```bash
 pytest           # fast unit tests (< 1 s)
-pytest -m slow   # full pipeline on data/test vs tests/expected/test_candidates.tsv (~3 min)
+pytest -m slow   # full pipeline on data/test vs tests/expected/test_candidates.tsv
 ```
 
 ## Limitations

@@ -113,8 +113,9 @@ def test_window_gc():
     (False, True, True, True, "dICE", "dCONJ+MOB+oriT"),
     (False, True, True, False, "IME", "MOB+oriT"),
     (False, False, True, False, "iOriT", "oriT"),
-    (True, True, False, False, "other", "T4SS+MOB"),         # ICE without detected oriT
-    (False, True, False, False, "other", "MOB"),             # relaxase only
+    (True, True, False, False, "ICE_noOriT", "T4SS+MOB"),
+    (False, True, False, True, "dICE_noOriT", "dCONJ+MOB"),
+    (False, True, False, False, "IME_noOriT", "MOB"),
     (True, False, True, False, "other", "T4SS+oriT"),
     (False, False, False, True, "other", "dCONJ"),
     (False, False, False, False, "none", "-"),
@@ -201,3 +202,28 @@ def test_find_dr_wraps_circular_contig():
     args = argparse.Namespace(outside=3000, inside=3000, min_len=18, max_copies=2)
     assert direct_repeats.find_dr(genome, [genome], start, end, args, circular=True)["dr"]
     assert not direct_repeats.find_dr(genome, [genome], start, end, args, circular=False)["dr"]
+
+
+def brute_copies(seq, genome):
+    """Slow reference: count every trimmed variant on both strands position by position."""
+    from Bio.Seq import reverse_complement as rc
+
+    def count(v):
+        strands = {v, rc(v)}
+        return sum(genome[p:p + len(v)] in strands for p in range(len(genome) - len(v) + 1))
+
+    n = len(seq)
+    trimmed = [seq[i:n - j] for i in range(3) for j in range(3) if (i, j) != (0, 0)]
+    return count(seq), max(count(v) for v in trimmed)
+
+
+@pytest.mark.parametrize("seq", [
+    "GCTCAGTTGGTAGAGCGCAACC",     # ordinary DR
+    "GGGCCCGGGCCCGGGCCC",         # reverse-palindromic, trimmed versions are not
+    "AAGCTTGCATGCAAGCTT",
+])
+def test_dr_copies_matches_brute_force(seq):
+    from Bio.Seq import reverse_complement as rc
+    genome = (random_dna(3000, 4) + seq + random_dna(2000, 5) + rc(seq) + random_dna(2000, 6)
+              + seq[2:] + random_dna(1000, 7) + seq[:-1] + random_dna(500, 8))
+    assert direct_repeats.dr_copies(seq, [genome]) == brute_copies(seq, genome)

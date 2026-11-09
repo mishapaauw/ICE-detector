@@ -14,8 +14,11 @@ category (from oriT, relaxase and conjugation system):
   dICE   oriT + relaxase + decayed conjugation system (dCONJ model), no complete one
   IME    oriT + relaxase, no conjugation system
   iOriT  oriT only: no relaxase, no conjugation system
+  ICE_noOriT, dICE_noOriT, IME_noOriT
+         as ICE / dICE / IME, but no oriT found (the oriT profiles cover only
+         known oriT families, so many real elements will land here)
   other  any other combination of mobility genes (see mobility_genes, e.g.
-         "T4SS+MOB" = ICE without a detected oriT, "MOB" = relaxase only)
+         "T4SS" = conjugation system without relaxase)
   none   no oriT, relaxase or conjugation system
 mobility_genes: which of T4SS, dCONJ, MOB (relaxase), oriT were found, joined by "+".
 
@@ -39,7 +42,8 @@ from pathlib import Path
 
 import pandas as pd
 
-CATEGORY_ORDER = {"ICE": 0, "dICE": 1, "IME": 2, "iOriT": 3, "other": 4, "none": 5}
+CATEGORY_ORDER = {"ICE": 0, "dICE": 1, "IME": 2, "iOriT": 3, "ICE_noOriT": 4,
+                  "dICE_noOriT": 5, "IME_noOriT": 6, "other": 7, "none": 8}
 
 
 def mobility_genes(row):
@@ -52,13 +56,10 @@ def mobility_genes(row):
 def classify(row):
     t4ss, relaxase, orit = row["t4ss"], row["relaxase"], row["orit"]
     dconj = row["dconj_system"] and not t4ss
-    if orit and relaxase and t4ss:
-        return "ICE"
-    if orit and relaxase and dconj:
-        return "dICE"
-    if orit and relaxase and not dconj:
-        return "IME"
-    if orit and not (relaxase or t4ss or dconj):
+    if relaxase:
+        base = "ICE" if t4ss else "dICE" if dconj else "IME"
+        return base if orit else f"{base}_noOriT"
+    if orit and not (t4ss or dconj):
         return "iOriT"
     if t4ss or dconj or relaxase:
         return "other"
