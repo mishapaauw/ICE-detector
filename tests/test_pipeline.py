@@ -13,7 +13,7 @@ import pytest
 from conftest import ROOT
 
 EXPECTED = ROOT / "tests" / "expected" / "test_candidates.tsv"
-COLS = ["region_id", "category", "confidence", "evidence_count"]
+COLS = ["region_id", "category", "mobility_genes", "evidence_count"]
 
 
 @pytest.mark.slow

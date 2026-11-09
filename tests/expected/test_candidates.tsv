@@ -1,16 +1,16 @@
 # Expected ice_candidates.tsv for data/test with default settings.
-# Baseline regenerated 2026-11-09 after adding direct-repeat evidence (approved by user); ppanggolin 2.3.2, macsyfinder 2.1.6, CONJScan 2.1.0, hmmer 3.4, oriT figshare v1.
+# Baseline regenerated 2026-11-09 after new categories (ICE/dICE/IME/iOriT) and DR defaults 5 kb / 15 bp (approved by user); ppanggolin 2.3.2, macsyfinder 2.1.6, CONJScan 2.1.0, hmmer 3.4, oriT figshare v1.
 # Do not edit to make tests pass; a change here is a change in results.
-region_id	category	confidence	evidence_count
-bc40_contig_1_polish_RGP_1	mobilizable		2
-bc40_contig_1_polish_RGP_2	mobilizable		2
-bc40_contig_1_polish_RGP_3	mobilizable		3
-bc71_contig_1_polish_RGP_0	ICE	high	5
-bc71_contig_1_polish_RGP_1	mobilizable		2
-bc71_contig_1_polish_RGP_3	mobilizable		3
-bc74_contig_1_polish_RGP_0	ICE	high	4
-bc74_contig_1_polish_RGP_1	mobilizable		2
-bc84_contig_1_polish_RGP_0	mobilizable		2
-bc84_contig_1_polish_RGP_8	mobilizable		3
-bc86_contig_1_polish_RGP_0	ICE	high	5
-bc86_contig_1_polish_RGP_1	mobilizable		3
+region_id	category	mobility_genes	evidence_count
+bc40_contig_1_polish_RGP_1	other	MOB	2
+bc40_contig_1_polish_RGP_2	other	MOB	3
+bc40_contig_1_polish_RGP_3	other	MOB	3
+bc71_contig_1_polish_RGP_0	ICE	T4SS+MOB+oriT	5
+bc71_contig_1_polish_RGP_1	other	MOB	2
+bc71_contig_1_polish_RGP_3	IME	MOB+oriT	3
+bc74_contig_1_polish_RGP_0	ICE	T4SS+MOB+oriT	4
+bc74_contig_1_polish_RGP_1	other	MOB	2
+bc84_contig_1_polish_RGP_0	other	MOB	2
+bc84_contig_1_polish_RGP_8	other	MOB	3
+bc86_contig_1_polish_RGP_0	ICE	T4SS+MOB+oriT	5
+bc86_contig_1_polish_RGP_1	other	MOB	3

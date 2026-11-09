@@ -107,17 +107,22 @@ def test_window_gc():
 
 # --- build_table --------------------------------------------------------------------
 
-@pytest.mark.parametrize("t4ss,relaxase,orit,dconj,expected", [
-    (True, True, True, False, ("ICE", "high")),
-    (True, True, False, False, ("ICE", "medium")),
-    (True, False, False, False, ("ICE", "low")),
-    (False, False, False, True, ("decayed_ICE", "")),
-    (False, True, True, False, ("mobilizable", "")),
-    (False, False, True, False, ("none", "")),
+@pytest.mark.parametrize("t4ss,relaxase,orit,dconj,expected,genes", [
+    (True, True, True, False, "ICE", "T4SS+MOB+oriT"),
+    (True, True, True, True, "ICE", "T4SS+MOB+oriT"),       # complete system wins over dCONJ
+    (False, True, True, True, "dICE", "dCONJ+MOB+oriT"),
+    (False, True, True, False, "IME", "MOB+oriT"),
+    (False, False, True, False, "iOriT", "oriT"),
+    (True, True, False, False, "other", "T4SS+MOB"),         # ICE without detected oriT
+    (False, True, False, False, "other", "MOB"),             # relaxase only
+    (True, False, True, False, "other", "T4SS+oriT"),
+    (False, False, False, True, "other", "dCONJ"),
+    (False, False, False, False, "none", "-"),
 ])
-def test_classify(t4ss, relaxase, orit, dconj, expected):
+def test_classify(t4ss, relaxase, orit, dconj, expected, genes):
     row = {"t4ss": t4ss, "relaxase": relaxase, "orit": orit, "dconj_system": dconj}
     assert build_table.classify(row) == expected
+    assert build_table.mobility_genes(row) == genes
 
 
 # --- direct_repeats -------------------------------------------------------------------
@@ -159,14 +164,29 @@ def test_find_dr_in_flanks_of_inserted_element():
 
 
 def test_find_dr_rejects_genome_wide_repeat():
-    """A repeat with a third copy elsewhere (e.g. REP element) is not a DR."""
-    att = "GCTCAGTTGGTAGAGCGCAACC"
+    """A high-copy repeat (REP-like, 6 copies) at both ends is not a DR, even if
+    chance bases next to the two flanking copies make the match longer."""
+    rep = "GCTCAGTTGGTAGAGCGCAACC"
     left, element, right = random_dna(10000, 1), random_dna(5000, 2), random_dna(10000, 3)
-    genome = left + att + element + att + right + att
-    start = len(left) + len(att) + 1
+    # force a 2 bp chance extension: same 2 bases before both flanking copies
+    left, element = left[:-2] + "GA", element[:-2] + "GA"
+    elsewhere = "".join(random_dna(500, 10 + i) + rep for i in range(4))
+    genome = left + rep + element + rep + right + elsewhere
+    start = len(left) + len(rep) + 1
     end = start + len(element) - 1
     args = argparse.Namespace(outside=3000, inside=3000, min_len=18, max_copies=2)
     assert not direct_repeats.find_dr(genome, [genome], start, end, args, circular=False)["dr"]
+
+
+def test_find_dr_allows_one_near_copy_elsewhere():
+    """A real att whose 2bp-trimmed core occurs once more elsewhere is still a DR."""
+    att = "GCTCAGTTGGTAGAGCGCAACC"
+    left, element, right = random_dna(10000, 1), random_dna(5000, 2), random_dna(10000, 3)
+    genome = left + att + element + att + right + att[2:]   # partial third copy
+    start = len(left) + len(att) + 1
+    end = start + len(element) - 1
+    args = argparse.Namespace(outside=3000, inside=3000, min_len=18, max_copies=2)
+    assert direct_repeats.find_dr(genome, [genome], start, end, args, circular=False)["dr"]
 
 
 def test_find_dr_wraps_circular_contig():

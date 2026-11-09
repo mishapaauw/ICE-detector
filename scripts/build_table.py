@@ -9,15 +9,15 @@ Per region (RGP with >= --min-orfs genes), evidence is:
   dr         direct repeats (putative attL/attR) found at both region ends
 evidence_count = number of these five that are True.
 
-category:
-  ICE           t4ss (Cury et al. 2017: spots encoding a conjugative system)
-  decayed_ICE   no t4ss, but a decayed conjugation system (dCONJ model)
-  mobilizable   no conjugation system, but a relaxase (possible IME)
-  none          none of the above
-confidence (ICE only):
-  high    t4ss + relaxase + orit
-  medium  t4ss + relaxase or orit
-  low     t4ss only
+category (from oriT, relaxase and conjugation system):
+  ICE    oriT + relaxase + complete conjugation system (T4SS model)
+  dICE   oriT + relaxase + decayed conjugation system (dCONJ model), no complete one
+  IME    oriT + relaxase, no conjugation system
+  iOriT  oriT only: no relaxase, no conjugation system
+  other  any other combination of mobility genes (see mobility_genes, e.g.
+         "T4SS+MOB" = ICE without a detected oriT, "MOB" = relaxase only)
+  none   no oriT, relaxase or conjugation system
+mobility_genes: which of T4SS, dCONJ, MOB (relaxase), oriT were found, joined by "+".
 
 Outputs (in --outdir):
   all_regions.tsv     every region with all evidence columns
@@ -25,7 +25,7 @@ Outputs (in --outdir):
                       AND at least one mobility marker (t4ss, relaxase or orit),
                       so ICEs and IME candidates, but not e.g. prophages that
                       only have atypical GC + DRs. Sorted by category,
-                      confidence and evidence
+                      and evidence
   ice_fasta/          FASTA of each candidate region (copied from regions/fasta)
 element_start/element_end: outer edges of the DR pair, when found; a refined
 estimate of the element boundaries (region start/end come from PPanGGOLiN).
@@ -39,18 +39,30 @@ from pathlib import Path
 
 import pandas as pd
 
-CONF_ORDER = {"high": 0, "medium": 1, "low": 2, "": 3}
+CATEGORY_ORDER = {"ICE": 0, "dICE": 1, "IME": 2, "iOriT": 3, "other": 4, "none": 5}
+
+
+def mobility_genes(row):
+    dconj = row["dconj_system"] and not row["t4ss"]
+    found = [("T4SS", row["t4ss"]), ("dCONJ", dconj),
+             ("MOB", row["relaxase"]), ("oriT", row["orit"])]
+    return "+".join(name for name, present in found if present) or "-"
 
 
 def classify(row):
-    if row["t4ss"]:
-        n = row["relaxase"] + row["orit"]
-        return "ICE", {2: "high", 1: "medium", 0: "low"}[n]
-    if row["dconj_system"]:
-        return "decayed_ICE", ""
-    if row["relaxase"]:
-        return "mobilizable", ""
-    return "none", ""
+    t4ss, relaxase, orit = row["t4ss"], row["relaxase"], row["orit"]
+    dconj = row["dconj_system"] and not t4ss
+    if orit and relaxase and t4ss:
+        return "ICE"
+    if orit and relaxase and dconj:
+        return "dICE"
+    if orit and relaxase and not dconj:
+        return "IME"
+    if orit and not (relaxase or t4ss or dconj):
+        return "iOriT"
+    if t4ss or dconj or relaxase:
+        return "other"
+    return "none"
 
 
 def spot_genome_counts(spots_tsv, rgp_tsv):
@@ -98,14 +110,15 @@ def main():
                 "dr_left_start", "dr_left_end", "dr_right_start", "dr_right_end",
                 "element_start", "element_end"):
         df[col] = df[col].astype("Int64")
-    df[["category", "confidence"]] = df.apply(lambda r: pd.Series(classify(r)), axis=1)
+    df["category"] = df.apply(classify, axis=1)
+    df["mobility_genes"] = df.apply(mobility_genes, axis=1)
     df = df.join(spot_genome_counts(res / "ppanggolin" / "spots.tsv",
                                     res / "ppanggolin" / "regions_of_genomic_plasticity.tsv"),
                  on="spot_id")
     df["spot_n_genomes"] = df["spot_n_genomes"].fillna(1).astype(int)
 
     cols = ["region_id", "genome", "contig", "start", "end", "length", "n_orfs",
-            "spot_id", "spot_n_genomes", "category", "confidence", "evidence_count",
+            "spot_id", "spot_n_genomes", "category", "mobility_genes", "evidence_count",
             "t4ss", "relaxase", "orit", "gc_atypical", "dr",
             "element_start", "element_end",
             "conj_systems", "dconj_systems", "relaxase_types", "t4cp", "virb4",
@@ -115,11 +128,9 @@ def main():
             "dr_right_start", "dr_right_end", "dr_left_offset", "dr_right_offset",
             "coordinates", "contig_border"]
     df = df[cols].sort_values(
-        ["category", "confidence", "evidence_count", "genome", "start"],
-        key=lambda s: s.map(CONF_ORDER) if s.name == "confidence"
-        else (s.map({"ICE": 0, "decayed_ICE": 1, "mobilizable": 2, "none": 3})
-              if s.name == "category" else s),
-        ascending=[True, True, False, True, True])
+        ["category", "evidence_count", "genome", "start"],
+        key=lambda s: s.map(CATEGORY_ORDER) if s.name == "category" else s,
+        ascending=[True, False, True, True])
     df.to_csv(out / "all_regions.tsv", sep="\t", index=False)
 
     mobility = df["t4ss"] | df["relaxase"] | df["orit"]
@@ -146,9 +157,9 @@ def main():
 
     print(f"{len(df)} regions: " + ", ".join(
         f"{k}={v}" for k, v in df["category"].value_counts().items()))
-    ices = df[df["category"] == "ICE"]
-    print("ICE confidence: " + (", ".join(
-        f"{k}={v}" for k, v in ices["confidence"].value_counts().items()) or "none"))
+    other = df[df["category"] == "other"]
+    print("other: " + (", ".join(
+        f"{k}={v}" for k, v in other["mobility_genes"].value_counts().items()) or "none"))
     print(f"candidates (evidence >= {args.min_evidence} + mobility marker): {len(ice)} (" + ", ".join(
         f"{k}={v}" for k, v in ice["category"].value_counts().items()) + ")")
     print(f"-> {out / 'ice_candidates.tsv'}, {out / 'all_regions.tsv'}, {fasta_out}/")

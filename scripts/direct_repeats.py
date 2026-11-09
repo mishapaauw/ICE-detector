@@ -8,16 +8,18 @@ attachment site, so the element ends up flanked by two identical copies
 For each region, two windows are compared:
   left  = [start - outside, start + inside)     around the region start
   right = (end - inside, end + outside]         around the region end
-(--outside / --inside, default 3000 bp each; inside is capped at half the
+(--outside / --inside, default 5000 bp each; inside is capped at half the
 region length; windows wrap around circular contigs.)
 
-A DR candidate is an exact, same-strand match of >= --min-len bp (default 18)
+A DR candidate is an exact, same-strand match of >= --min-len bp (default 15)
 present in both windows, extended to its maximal length. Candidates are kept if
   - they are not low-complexity (>= half of their 3-mers distinct), and
-  - the DR is unique to its two flanking copies: the median genome-wide copy
-    number (both strands) of its --min-len-mers is <= --max-copies (default 2).
-    Using k-mers stops a REP element or other genome-wide repeat from passing
-    just because a chance base extends it into a "unique" longer match.
+  - the DR is unique to its two flanking copies: it occurs at most --max-copies
+    times in the genome (both strands; default 2), and versions trimmed by up to
+    2 bp at either end occur at most --max-copies + 1 times. The trimmed check
+    stops a REP element or other high-copy repeat from passing just because 1-2
+    chance bases extend it into a "unique" longer match, while still allowing a
+    real att site that has one near-copy elsewhere (seen in the test genomes).
 The longest kept candidate is reported (ties: closest to the region ends).
 Its outer coordinates give a refined element boundary: dr_left_start..dr_right_end.
 
@@ -71,10 +73,10 @@ def low_complexity(s):
     return len(trimers) < 0.5 * (len(s) - 2)
 
 
-def kmer_copies(seq, contigs, k):
-    """Median genome-wide copy number of the k-mers of seq (both strands)."""
-    counts = sorted(count_copies(seq[i:i + k], contigs) for i in range(len(seq) - k + 1))
-    return counts[len(counts) // 2]
+def dr_copies(seq, contigs):
+    """(copies of seq, max copies of seq trimmed by up to 2 bp per end), both strands."""
+    trimmed = {seq[i:len(seq) - j] for i in range(3) for j in range(3)} - {seq}
+    return count_copies(seq, contigs), max(count_copies(v, contigs) for v in trimmed)
 
 
 def count_copies(seq, contigs):
@@ -98,12 +100,13 @@ def find_dr(contig_seq, all_contigs, start, end, args, circular):
         if low_complexity(s):
             continue
         if s not in seen:
-            seen[s] = kmer_copies(s, all_contigs, args.min_len)
-        if seen[s] > args.max_copies:
+            seen[s] = dr_copies(s, all_contigs)
+        exact, trimmed = seen[s]
+        if exact > args.max_copies or trimmed > args.max_copies + 1:
             continue
         # distance of each copy to its region end (for tie-breaking)
         dist = abs(lraw[i] - start) + abs(rraw[j + mlen - 1] - end)
-        kept.append((mlen, -dist, i, j, s, seen[s]))
+        kept.append((mlen, -dist, i, j, s, exact))
     if not kept:
         return {"dr": False, "n_dr_candidates": 0, "n_raw_matches": n_raw}
 
@@ -134,13 +137,13 @@ def main():
     ap.add_argument("--regions", required=True, help="regions/regions.tsv")
     ap.add_argument("--fasta-list", required=True)
     ap.add_argument("-o", "--outdir", required=True)
-    ap.add_argument("--outside", type=int, default=3000,
-                    help="bp searched outside each region end (default: 3000)")
-    ap.add_argument("--inside", type=int, default=3000,
-                    help="bp searched inside each region end (default: 3000)")
-    ap.add_argument("--min-len", type=int, default=18,
-                    help="minimum DR length (default: 18; ~3.5%% background rate on the "
-                         "test genomes with default windows, vs ~29%% at 15 bp)")
+    ap.add_argument("--outside", type=int, default=5000,
+                    help="bp searched outside each region end (default: 5000)")
+    ap.add_argument("--inside", type=int, default=5000,
+                    help="bp searched inside each region end (default: 5000)")
+    ap.add_argument("--min-len", type=int, default=15,
+                    help="minimum DR length (default: 15, as in Ares-Arroyo et al. 2026; "
+                         "see README for background rates)")
     ap.add_argument("--max-copies", type=int, default=2,
                     help="max genome-wide copies of a DR (default: 2)")
     args = ap.parse_args()

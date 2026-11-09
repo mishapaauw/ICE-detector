@@ -54,12 +54,12 @@ def main():
                     help="max E-value for oriT hits (default: 0.01)")
     ap.add_argument("--min-evidence", type=int, default=2,
                     help="min evidence count (of 5) for ice_candidates.tsv (default: 2)")
-    ap.add_argument("--dr-outside", type=int, default=3000,
-                    help="bp searched for direct repeats outside each region end (default: 3000)")
-    ap.add_argument("--dr-inside", type=int, default=3000,
-                    help="bp searched for direct repeats inside each region end (default: 3000)")
-    ap.add_argument("--dr-min-len", type=int, default=18,
-                    help="minimum direct repeat length (default: 18)")
+    ap.add_argument("--dr-outside", type=int, default=5000,
+                    help="bp searched for direct repeats outside each region end (default: 5000)")
+    ap.add_argument("--dr-inside", type=int, default=5000,
+                    help="bp searched for direct repeats inside each region end (default: 5000)")
+    ap.add_argument("--dr-min-len", type=int, default=15,
+                    help="minimum direct repeat length (default: 15)")
     ap.add_argument("--dr-max-copies", type=int, default=2,
                     help="max genome-wide copies of a direct repeat (default: 2)")
     ap.add_argument("--gc-flank", type=int, default=35000,
