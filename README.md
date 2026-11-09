@@ -3,11 +3,10 @@
 A tool to detect ICEs in bacterial genomes using pangenomics and function annotation.
 Co-developed by Claude Code and myself.
 
-Delineates **integrative conjugative elements (ICEs)** in complete or draft bacterial
+Delineates **integrative conjugative elements (ICEs)** in complete bacterial
 genome assemblies of one species. The same evidence is also used to flag
 **integrative mobilizable elements (IMEs)**, decayed ICEs and elements that carry
-only an oriT. Finding these is an explicit goal too, although the tool keeps its
-name for now.
+only an oriT. 
 
 Approach (after Cury et al. 2017 and Ares-Arroyo et al. 2026; see [References](#references)):
 
@@ -39,12 +38,13 @@ Approach (after Cury et al. 2017 and Ares-Arroyo et al. 2026; see [References](#
    | `dICE_noOriT` | not found | yes | decayed |
    | `IME_noOriT` | not found | yes | none |
    | `other` | any other combination (e.g. conjugation system without relaxase); see `mobility_genes` | | |
+   | `none` | no | no | none |
 
    The `_noOriT` categories exist because the oriT profiles only cover known oriT
    families: many real ICEs and IMEs will have an oriT that is not detected.
-   | `none` | no | no | none |
 
-Plasmids are out of scope; identify them separately (e.g. with geNomad).
+Only the chromosome is analysed: plasmids are out of scope (identify them
+separately, e.g. with geNomad). See [Input genomes](#input-genomes).
 
 ## Installation
 
@@ -62,8 +62,8 @@ python scripts/download_orit_hmms.py -o db/orit
 
 ## Usage
 
-Input: a folder with one FASTA per genome (≥ 5 genomes of the same species).
-Contig names must be unique across all genomes.
+Input: a folder with one FASTA per **complete** genome (≥ 5 genomes of the same
+species). See [Input genomes](#input-genomes).
 
 ```bash
 python scripts/run_all.py data/test -o results/test --cpu 8
@@ -82,6 +82,31 @@ python scripts/run_all.py data/test -o results/test --cpu 8
 | `--dr-max-copies` | 2 | max genome-wide copies of a DR (versions trimmed by ≤ 2 bp per end may have one more) |
 | `--linear` | off | treat contigs as linear (default: circular) |
 | `--skip-ppanggolin`, `--skip-macsyfinder`, `--skip-nhmmscan` | off | reuse earlier tool output (e.g. to change only the filters) |
+
+## Input genomes
+
+
+1. **Input FASTA files are only read**, never modified, renamed or moved.
+2. **Only the largest contig of each genome is analysed** (the chromosome, in a
+   complete assembly). All other contigs (plasmids, phage contigs, small
+   leftovers) are dropped, whatever their FASTA header says. If two contigs are
+   equally large, the first one in the file is kept.
+3. The largest contig is written to a **temporary copy**,
+   `<outdir>/tmp_chromosomes/<genome>.fasta`, which all steps use. The copies are
+   deleted when the run ends, also if it fails. Re-runs (e.g. with
+   `--skip-ppanggolin`) make them again, identically.
+4. `<outdir>/input_contigs.tsv` records for every genome the input file, the kept
+   contig and its length, the assembly length and the dropped contigs
+   (`name:length`).
+5. **Complete genomes only.** If the kept contig is less than 50% of the assembly
+   (likely a draft genome), a warning is written to `logs/make_fasta_list.log`;
+   the run continues, but most of that genome is then ignored.
+6. Genome name = file name without extension; the chromosome names must be unique
+   across genomes (plasmid names may repeat). Contigs are treated as circular
+   unless `--linear` is given.
+
+`all_regions.tsv` and `genome_gc` describe
+chromosomes only, and DR uniqueness is counted on the chromosome only.
 
 ## Output (`<outdir>/final/`)
 
@@ -109,7 +134,10 @@ Key columns:
 | `flank_up_gc`, `flank_down_gc`, `flank_gc`, `gc_diff_flank` | GC vs the flanking DNA |
 
 Intermediate results are kept per step: `ppanggolin/`, `regions/` (per-region FASTA),
-`conjugation/`, `orit/`, `gc/`, `dr/`, each with its own `versions.txt`.
+`conjugation/`, `orit/`, `gc/`, `dr/`, each with its own `versions.txt`. Also in
+`<outdir>`: `input_contigs.tsv` (see [Input genomes](#input-genomes)) and
+`genomes.fasta.list` (the PPanGGOLiN input; it points to the temporary copies,
+which no longer exist after the run).
 
 ## Tests
 
@@ -120,6 +148,9 @@ pytest -m slow   # full pipeline on data/test vs tests/expected/test_candidates.
 
 ## Limitations
 
+- Complete genomes only: per genome just the largest contig is analysed, so ICEs
+  on plasmids, secondary chromosomes or other contigs are not found, and draft
+  assemblies lose most of their sequence.
 - Region boundaries come from PPanGGOLiN, refined only when a DR pair is found.
   Refinement using gene frequencies within the spot (as in Cury et al. 2017) is
   not implemented.

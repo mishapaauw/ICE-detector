@@ -29,6 +29,7 @@ The algorithm should be the following:
 - Never print long files (e.g. full genome fasta). Use head, wc -l, cut, or write a summary script.
 - Set seeds and record tool versions in every output folder.
 - Don't change expected test outputs to make tests pass; ask me instead.
+- Input genome FASTA files (chromosome + plasmids) are only read, never changed: other tools in the larger pipeline (e.g. geNomad) need them as they are. ICE-detector is standalone (no geNomad output needed): it analyses only the largest contig per genome, via temporary copies that are deleted after the run. See README "Input genomes".
 
 ## Environments
 

@@ -35,6 +35,30 @@ def test_fasta_list_rejects_duplicate_contig_names(tmp_path):
         make_fasta_list.build_list(tmp_path)
 
 
+def test_extract_chromosomes_keeps_largest_contig_only(tmp_path):
+    inp, out = tmp_path / "in", tmp_path / "chrom"
+    inp.mkdir()
+    write_fasta(inp / "g1.fna", [("p1", "ACGT"), ("chr1", "ACGTACGTAC\nGTAC"), ("p2", "AC")])
+    write_fasta(inp / "g2.fasta", [("chr2", "AAAA"), ("p3", "CCCC")])  # tie: first wins
+    before = (inp / "g1.fna").read_text()
+    report = make_fasta_list.extract_chromosomes(inp, out)
+    assert (inp / "g1.fna").read_text() == before                 # input untouched
+    assert (out / "g1.fasta").read_text() == ">chr1\nACGTACGTAC\nGTAC\n"
+    assert [r["kept_contig"] for r in report] == ["chr1", "chr2"]
+    assert report[0]["kept_length"] == 14 and report[0]["assembly_length"] == 20
+    assert report[0]["dropped_contigs"] == "p1:4,p2:2"
+    assert [r[2:] for r in make_fasta_list.build_list(out)] == [["chr1"], ["chr2"]]
+
+
+def test_extract_chromosomes_allows_same_plasmid_names_across_genomes(tmp_path):
+    inp = tmp_path / "in"
+    inp.mkdir()
+    write_fasta(inp / "g1.fasta", [("chr1", "ACGTACGT"), ("plasmid1", "ACG")])
+    write_fasta(inp / "g2.fasta", [("chr2", "ACGTACGT"), ("plasmid1", "ACG")])
+    make_fasta_list.extract_chromosomes(inp, tmp_path / "chrom")
+    assert len(make_fasta_list.build_list(tmp_path / "chrom")) == 2
+
+
 # --- extract_regions -----------------------------------------------------------
 
 def test_parse_and_cut_coordinates():

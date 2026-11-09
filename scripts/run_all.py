@@ -4,8 +4,14 @@
 Run inside the ICE-detector conda env:
     python scripts/run_all.py data/test -o results/test --cpu 8 --min-orfs 10
 
+Only the largest contig of each genome (the chromosome) is analysed; plasmids
+and other contigs are dropped. The input FASTA files are only read: temporary
+copies with just the largest contig are written to <outdir>/tmp_chromosomes/
+and deleted when the run ends (also when it fails). input_contigs.tsv records
+what was kept and dropped.
+
 Steps (each writes its own subfolder with versions.txt):
-    1. genomes.fasta.list  (make_fasta_list.py)
+    1. genomes.fasta.list  (make_fasta_list.py) + input_contigs.tsv
     2. ppanggolin/          (run_ppanggolin.sh)
     3. regions/             (extract_regions.py)
     4. conjugation/         (detect_conjugation.sh + summarize_conjugation.py)
@@ -16,6 +22,7 @@ Steps (each writes its own subfolder with versions.txt):
 Reference data must be in db/ first (see db/README.md).
 """
 import argparse
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -72,9 +79,25 @@ def main():
     logs = out / "logs"
     logs.mkdir(parents=True, exist_ok=True)
     fasta_list = out / "genomes.fasta.list"
-    py = sys.executable
+    chrom_dir = out / "tmp_chromosomes"
+    try:
+        run_steps(args, out, logs, fasta_list, chrom_dir)
+    finally:
+        shutil.rmtree(chrom_dir, ignore_errors=True)  # temporary chromosome copies
 
-    cmd = [py, SCRIPTS / "make_fasta_list.py", args.input_dir, "-o", fasta_list]
+    run([sys.executable, SCRIPTS / "build_table.py", "--results", out, "--gc-z", args.gc_z,
+         "--min-evidence", args.min_evidence],
+        logs / "build_table.log")
+
+    print((logs / "build_table.log").read_text().strip())
+    print(f"[run_all] done: {out}/final/ice_candidates.tsv")
+
+
+def run_steps(args, out, logs, fasta_list, chrom_dir):
+    """Steps 1-6b; they read the genomes through fasta_list (copies in chrom_dir)."""
+    py = sys.executable
+    cmd = [py, SCRIPTS / "make_fasta_list.py", args.input_dir, "-o", fasta_list,
+           "--chromosome-dir", chrom_dir, "--report", out / "input_contigs.tsv"]
     if args.linear:
         cmd.append("--linear")
     run(cmd, logs / "make_fasta_list.log")
@@ -113,13 +136,6 @@ def main():
          "--fasta-list", fasta_list, "-o", out / "dr", "--outside", args.dr_outside,
          "--inside", args.dr_inside, "--min-len", args.dr_min_len,
          "--max-copies", args.dr_max_copies], logs / "direct_repeats.log")
-
-    run([py, SCRIPTS / "build_table.py", "--results", out, "--gc-z", args.gc_z,
-         "--min-evidence", args.min_evidence],
-        logs / "build_table.log")
-
-    print((logs / "build_table.log").read_text().strip())
-    print(f"[run_all] done: {out}/final/ice_candidates.tsv")
 
 
 if __name__ == "__main__":
