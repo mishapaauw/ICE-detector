@@ -2,11 +2,13 @@
 """Map MacSyFinder/CONJScan hits onto PPanGGOLiN regions (milestone 2a + 2b).
 
 Inputs:
-  --regions      regions/regions.tsv (RGPs kept after the --min-orfs filter)
-  --tables       PPanGGOLiN table/ folder: gene -> RGP membership for all RGPs
-  --macsyfinder  folder with one MacSyFinder output folder per genome
+  --regions       regions/regions.tsv (regions kept after merging and --min-orfs)
+  --region-genes  regions/region_genes.tsv: gene -> region (incl. merge-gap genes)
+  --tables        PPanGGOLiN table/ folder: gene -> RGP membership for all RGPs
+  --macsyfinder   folder with one MacSyFinder output folder per genome
 Outputs (in --outdir):
-  conjugation_hits.tsv  every hit of the best solution, with the RGP it lies in
+  conjugation_hits.tsv  every hit of the best solution, with the kept region
+                        (region_id) and the PPanGGOLiN RGP (rgp_id, any size) it lies in
   conjugation.tsv       one row per kept region:
     conj_system      True if a T4SS system has >= --min-frac of its hits in the region
     conj_systems     e.g. "T4SS_typeG:barcode71_rotated_T4SS_typeG_6(21/21)"
@@ -32,7 +34,7 @@ def gene_to_rgp(tables_dir):
     return mapping
 
 
-def load_hits(msf_dir, rgp_of):
+def load_hits(msf_dir, region_of, rgp_of):
     hits = []
     for best in sorted(Path(msf_dir).glob("*/best_solution.tsv")):
         for h in read_tsv(best, comment="#"):
@@ -43,7 +45,8 @@ def load_hits(msf_dir, rgp_of):
                 "genome": best.parent.name, "hit_id": h["hit_id"],
                 "gene_name": h["gene_name"], "model": model, "sys_id": h["sys_id"],
                 "hit_status": h["hit_status"], "hit_i_eval": h["hit_i_eval"],
-                "region_id": rgp_of.get(h["hit_id"], ""),
+                "region_id": region_of.get(h["hit_id"], ""),
+                "rgp_id": rgp_of.get(h["hit_id"], ""),
             })
     return hits
 
@@ -103,6 +106,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--regions", required=True)
+    ap.add_argument("--region-genes", required=True)
     ap.add_argument("--tables", required=True)
     ap.add_argument("--macsyfinder", required=True)
     ap.add_argument("-o", "--outdir", required=True)
@@ -114,7 +118,8 @@ def main():
     out = Path(args.outdir)
     out.mkdir(parents=True, exist_ok=True)
     regions = read_tsv(args.regions)
-    hits = load_hits(args.macsyfinder, gene_to_rgp(args.tables))
+    region_of = {g["gene"]: g["region_id"] for g in read_tsv(args.region_genes)}
+    hits = load_hits(args.macsyfinder, region_of, gene_to_rgp(args.tables))
     rows = summarize(regions, hits, args.min_frac)
 
     write_tsv(out / "conjugation_hits.tsv", hits, list(hits[0]) if hits else ["hit_id"])

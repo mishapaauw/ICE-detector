@@ -14,7 +14,11 @@ Approach (after Cury et al. 2017 and Ares-Arroyo et al. 2026; see [References](#
 
 1. **PPanGGOLiN** builds a pangenome from all genomes and predicts regions of
    genomic plasticity (RGPs), grouped into *spots* (insertion sites shared across genomes).
-2. Each region with at least `--min-orfs` genes is scored for:
+2. Neighbouring RGPs on the same chromosome that are at most `--merge-gap` (3)
+   genes apart are merged into one region: an element is often split into
+   several RGPs by a gene that is persistent in the pangenome. A merged region
+   keeps the ID of its largest RGP; `rgp_ids` lists all parts.
+   Each region with at least `--min-orfs` genes (counted after merging) is scored for:
    - a **conjugation system** (T4SS): MacSyFinder + CONJScan, chromosome models
    - a **relaxase** (MOB families, from the same CONJScan run)
    - an **integrase**: tyrosine (Pfam PF00589) or serine (PF00239, PF07508)
@@ -88,7 +92,8 @@ python scripts/run_all.py data/test -o results/test --cpu 8
 
 | Option | Default | Meaning |
 |---|---|---|
-| `--min-orfs` | 10 | keep only regions with at least this many genes |
+| `--min-orfs` | 10 | keep only regions with at least this many genes (after merging) |
+| `--merge-gap` | 3 | merge neighbouring RGPs at most this many genes apart; 0 = no merging |
 | `--min-evidence` | 2 | minimum evidence count (of 7) for `ice_candidates.tsv` |
 | `--orit-min-cov` | 0.7 | an oriT hit must cover this fraction of its HMM profile |
 | `--orit-max-evalue` | 0.01 | maximum E-value of an oriT hit |
@@ -140,7 +145,8 @@ Key columns:
 | Column | Meaning |
 |---|---|
 | `genome`, `contig`, `start`, `end`, `length`, `n_orfs` | location of the region |
-| `spot_id`, `spot_n_genomes` | PPanGGOLiN spot, and how many genomes have a region in it (spot labels change between runs; compare runs on `region_id`) |
+| `spot_id`, `spot_n_genomes` | PPanGGOLiN spot, and how many genomes have a region in it (spot labels change between runs; compare runs on `region_id`). Merged regions list all their spots (`spot_3;spot_7`) and give the largest genome count |
+| `rgp_ids`, `n_merged` | PPanGGOLiN RGPs merged into this region (`;`-joined, genomic order) and how many |
 | `category` | `ICE`, `dICE`, `IME`, `iOriT`, `ICE_noOriT`, `dICE_noOriT`, `IME_noOriT`, `other`, `none` (see table above) |
 | `mobility_genes` | what was found, joined by `+`: `T4SS`, `dCONJ`, `MOB` (relaxase), `oriT`; e.g. `T4SS+MOB` = ICE without a detected oriT |
 | `evidence_count` | number of: `t4ss`, `relaxase`, `orit`, `integrase`, `trna`, `gc_atypical`, `dr` |
@@ -174,6 +180,9 @@ pytest -m slow   # full pipeline on data/test vs tests/expected/test_candidates.
   on plasmids, secondary chromosomes or other contigs are not found, and draft
   assemblies lose most of their sequence.
 - Region boundaries come from PPanGGOLiN, refined only when a DR pair is found.
+  Neighbouring RGPs are merged by gene distance only, so two separate elements
+  that sit within `--merge-gap` genes of each other also end up in one region
+  (check `rgp_ids`). RGPs that span the origin of a circular chromosome are not merged.
   Refinement using gene frequencies within the spot (as in Cury et al. 2017) is
   not implemented.
 - DRs: only exact repeats are found. A diverged or deleted attR copy (seen in one

@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Merge all evidence into the final ICE table (milestone 5).
 
-Per region (RGP with >= --min-orfs genes), evidence is:
+Per region (RGP, or neighbouring RGPs merged, with >= --min-orfs genes), evidence is:
   t4ss       conjugation system (CONJScan T4SS model, >= 50% of its genes in region)
   relaxase   MOB relaxase gene in the region
   orit       oriT hit passing the E-value and profile-coverage filters
@@ -72,10 +72,16 @@ def classify(row):
 
 
 def spot_genome_counts(spots_tsv, rgp_tsv):
+    """spot_id -> number of genomes with an RGP in that spot."""
     spots = pd.read_csv(spots_tsv, sep="\t")
     rgps = pd.read_csv(rgp_tsv, sep="\t", usecols=["region", "genome"])
     m = spots.merge(rgps, left_on="rgp_id", right_on="region")
-    return m.groupby("spot_id")["genome"].nunique().rename("spot_n_genomes")
+    return m.groupby("spot_id")["genome"].nunique().to_dict()
+
+
+def region_spot_genomes(spot_ids, counts):
+    """Max genome count over the spots of a region ("spot_3;spot_7" when merged)."""
+    return max(counts.get(s, 1) for s in str(spot_ids).split(";"))
 
 
 def main():
@@ -126,10 +132,9 @@ def main():
         df[col] = df[col].astype("Int64")
     df["category"] = df.apply(classify, axis=1)
     df["mobility_genes"] = df.apply(mobility_genes, axis=1)
-    df = df.join(spot_genome_counts(res / "ppanggolin" / "spots.tsv",
-                                    res / "ppanggolin" / "regions_of_genomic_plasticity.tsv"),
-                 on="spot_id")
-    df["spot_n_genomes"] = df["spot_n_genomes"].fillna(1).astype(int)
+    counts = spot_genome_counts(res / "ppanggolin" / "spots.tsv",
+                                res / "ppanggolin" / "regions_of_genomic_plasticity.tsv")
+    df["spot_n_genomes"] = df["spot_id"].map(lambda s: region_spot_genomes(s, counts))
 
     cols = ["region_id", "genome", "contig", "start", "end", "length", "n_orfs",
             "spot_id", "spot_n_genomes", "category", "mobility_genes", "evidence_count",
@@ -142,7 +147,7 @@ def main():
             "gc_zscore", "flank_up_gc", "flank_down_gc", "flank_gc", "gc_diff_flank",
             "dr_length", "dr_seq", "dr_genome_copies", "dr_left_start", "dr_left_end",
             "dr_right_start", "dr_right_end", "dr_left_offset", "dr_right_offset",
-            "coordinates", "contig_border"]
+            "coordinates", "contig_border", "rgp_ids", "n_merged"]
     df = df[cols].sort_values(
         ["category", "evidence_count", "genome", "start"],
         key=lambda s: s.map(CATEGORY_ORDER) if s.name == "category" else s,

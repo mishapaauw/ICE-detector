@@ -46,7 +46,11 @@ def main():
     ap.add_argument("input_dir", help="folder with one FASTA per genome")
     ap.add_argument("-o", "--outdir", required=True)
     ap.add_argument("--cpu", type=int, default=4)
-    ap.add_argument("--min-orfs", type=int, default=10)
+    ap.add_argument("--min-orfs", type=int, default=10,
+                    help="keep regions with at least this many genes (default: 10)")
+    ap.add_argument("--merge-gap", type=int, default=3,
+                    help="merge neighbouring RGPs at most this many genes apart "
+                         "(default: 3; 0 = no merging)")
     ap.add_argument("--linear", action="store_true", help="treat contigs as linear")
     ap.add_argument("--skip-ppanggolin", action="store_true",
                     help="reuse an existing <outdir>/ppanggolin")
@@ -134,7 +138,8 @@ def run_steps(args, out, logs, fasta_list, chrom_dir):
             logs / "ppanggolin.log")
 
     run([py, SCRIPTS / "extract_regions.py", "--ppanggolin", out / "ppanggolin",
-         "--fasta-list", fasta_list, "-o", out / "regions", "--min-orfs", args.min_orfs],
+         "--fasta-list", fasta_list, "-o", out / "regions", "--min-orfs", args.min_orfs,
+         "--merge-gap", args.merge_gap],
         logs / "extract_regions.log")
 
     conj = out / "conjugation"
@@ -143,6 +148,7 @@ def run_steps(args, out, logs, fasta_list, chrom_dir):
              args.models_dir, "linear" if args.linear else "circular"],
             logs / "detect_conjugation.log")
     run([py, SCRIPTS / "summarize_conjugation.py", "--regions", out / "regions" / "regions.tsv",
+         "--region-genes", out / "regions" / "region_genes.tsv",
          "--tables", out / "ppanggolin" / "table", "--macsyfinder", conj / "macsyfinder",
          "-o", conj], logs / "summarize_conjugation.log")
 

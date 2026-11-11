@@ -366,7 +366,8 @@ def test_build_table_counts_seven_evidence_items(tmp_path):
     tsv("regions/regions.tsv", [{"region_id": r, "spot_id": "spot_1", "genome": "g", "contig": "c",
                                  "start": 1, "end": 100, "length": 100, "n_orfs": 10,
                                  "coordinates": "1..100", "contig_border": False,
-                                 "whole_contig": False} for r in rid])
+                                 "whole_contig": False, "rgp_ids": r, "n_merged": 1}
+                                for r in rid])
     tsv("conjugation/conjugation.tsv", [
         {"region_id": "R1", "conj_system": True, "conj_systems": "x", "dconj_system": False,
          "dconj_systems": "", "relaxase": True, "relaxase_types": "MOBH", "t4cp": True,
@@ -405,3 +406,48 @@ def test_build_table_counts_seven_evidence_items(tmp_path):
     assert out.loc["R2", "evidence_count"] == 1 and out.loc["R2", "category"] == "none"
     cand = pd.read_csv(res / "final/ice_candidates.tsv", sep="\t")
     assert cand["region_id"].tolist() == ["R1"]   # R2: integrase only, no mobility marker
+
+
+def test_region_spot_genomes_takes_max_over_merged_spots():
+    counts = {"spot_1": 2, "spot_2": 5}
+    assert build_table.region_spot_genomes("spot_1;spot_2", counts) == 5
+    assert build_table.region_spot_genomes("no_spot", counts) == 1
+
+
+# --- extract_regions: merging neighbouring RGPs -------------------------------------------
+
+def genes_on(contig, n, prefix):
+    return [{"gene": f"{prefix}{i}", "contig": contig, "start": str(100 * i + 1)}
+            for i in range(n)]
+
+
+def rgp(name, first, last, coords="1..10"):
+    return {"region": name, "first_gene": first, "last_gene": last, "coordinates": coords}
+
+
+def merged(groups):
+    return [[r["region"] for r in g] for g in groups]
+
+
+def test_merge_rgps_gap_rule_and_chains():
+    pos = extract_regions.gene_positions(genes_on("c1", 60, "g") + genes_on("c2", 20, "h"))
+    rgps = [rgp("A", "g0", "g9"), rgp("B", "g12", "g20"),   # 2 genes between A and B
+            rgp("C", "g23", "g30"),                          # 2 genes between B and C
+            rgp("D", "g35", "g40"),                          # 4 genes between C and D
+            rgp("E", "h0", "h5")]                            # other contig
+    assert merged(extract_regions.merge_rgps(rgps, pos, 3)) == [["A", "B", "C"], ["D"], ["E"]]
+    assert merged(extract_regions.merge_rgps(rgps, pos, 4)) == [["A", "B", "C", "D"], ["E"]]
+
+
+def test_merge_rgps_gap_zero_keeps_input_order():
+    pos = extract_regions.gene_positions(genes_on("c1", 60, "g"))
+    rgps = [rgp("B", "g12", "g20"), rgp("A", "g0", "g10"), rgp("C", "g40", "g50")]
+    assert merged(extract_regions.merge_rgps(rgps, pos, 0)) == [["B"], ["A"], ["C"]]
+    # merged groups are reported in genomic order, placed where their first RGP was
+    assert merged(extract_regions.merge_rgps(rgps, pos, 3)) == [["A", "B"], ["C"]]
+
+
+def test_merge_rgps_never_merges_origin_wrapping_rgp():
+    pos = extract_regions.gene_positions(genes_on("c1", 60, "g"))
+    rgps = [rgp("W", "g55", "g2", coords="5501..6000,1..300"), rgp("A", "g4", "g10")]
+    assert merged(extract_regions.merge_rgps(rgps, pos, 3)) == [["W"], ["A"]]
