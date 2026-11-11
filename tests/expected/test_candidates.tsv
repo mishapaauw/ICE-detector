@@ -1,16 +1,19 @@
-# Expected ice_candidates.tsv for data/test with default settings.
-# Baseline regenerated 2026-11-11 after adding integrase + tRNA evidence (7 items) and RGP merging (approved by user); ppanggolin 2.3.2, macsyfinder 2.1.6, CONJScan 2.1.0, hmmer 3.4, oriT figshare v1, Pfam 39.0, pyaragorn 0.3.0.
+# Expected ice_candidates.tsv for data/test (6 genomes, incl. barcode01) with default settings.
+# Baseline regenerated 2026-11-11 after adding barcode01 and region-edge extension over mobility genes (approved by user); ppanggolin 2.3.2, macsyfinder 2.1.6, CONJScan 2.1.0, hmmer 3.4, oriT figshare v1, Pfam 39.0, pyaragorn 0.3.0.
 # Do not edit to make tests pass; a change here is a change in results.
 region_id	category	mobility_genes	evidence_count
+bc01_contig_1_polish_RGP_0	IME_noOriT	MOB	5
+bc01_contig_1_polish_RGP_1	other	T4SS	3
 bc40_contig_1_polish_RGP_1	IME_noOriT	MOB	3
 bc40_contig_1_polish_RGP_2	IME_noOriT	MOB	5
 bc40_contig_1_polish_RGP_3	IME_noOriT	MOB	5
 bc71_contig_1_polish_RGP_0	ICE	T4SS+MOB+oriT	7
-bc71_contig_1_polish_RGP_1	IME_noOriT	MOB	4
+bc71_contig_1_polish_RGP_2	IME_noOriT	MOB	4
 bc71_contig_1_polish_RGP_3	IME	MOB+oriT	5
 bc74_contig_1_polish_RGP_0	ICE	T4SS+MOB+oriT	6
-bc74_contig_1_polish_RGP_1	IME_noOriT	MOB	3
+bc74_contig_1_polish_RGP_2	IME_noOriT	MOB	4
+bc74_contig_1_polish_RGP_26	other	T4SS	3
 bc84_contig_1_polish_RGP_0	IME_noOriT	MOB	3
-bc84_contig_1_polish_RGP_8	IME_noOriT	MOB	4
+bc84_contig_1_polish_RGP_9	IME_noOriT	MOB	4
 bc86_contig_1_polish_RGP_0	ICE	T4SS+MOB+oriT	7
 bc86_contig_1_polish_RGP_1	IME_noOriT	MOB	5
