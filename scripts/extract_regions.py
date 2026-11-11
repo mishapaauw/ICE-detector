@@ -10,40 +10,22 @@ Outputs (in --outdir):
   versions.txt
 """
 import argparse
-import csv
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 
 import Bio
 from Bio import SeqIO
 
+from common import parse_coordinates, read_fasta_list, read_tsv, write_tsv, write_versions
+
 REGION_COLS = ["region_id", "spot_id", "genome", "contig", "start", "end",
                "length", "n_orfs", "coordinates", "contig_border", "whole_contig"]
-
-
-def read_tsv(path):
-    with open(path) as handle:
-        return list(csv.DictReader(handle, delimiter="\t"))
-
-
-def parse_coordinates(coords):
-    """'100..200' or '5000..5100,1..50' (wraps origin) -> [(100, 200), ...]."""
-    segments = []
-    for part in coords.split(","):
-        start, end = part.split("..")
-        segments.append((int(start), int(end)))
-    return segments
+GENE_COLS = ["region_id", "gene", "contig", "start", "stop", "strand", "family", "partition"]
 
 
 def cut_sequence(seq, segments):
     """Concatenate 1-based inclusive segments of seq, in the given order."""
     return "".join(str(seq[s - 1:e]) for s, e in segments)
-
-
-def load_genome_paths(fasta_list):
-    with open(fasta_list) as handle:
-        return {row[0]: row[1] for row in csv.reader(handle, delimiter="\t") if row}
 
 
 def main():
@@ -66,7 +48,7 @@ def main():
     if not kept:
         sys.exit(f"No RGPs with >= {args.min_orfs} genes.")
 
-    genome_paths = load_genome_paths(args.fasta_list)
+    genome_paths, _ = read_fasta_list(args.fasta_list)
     by_genome = {}
     for r in kept:
         by_genome.setdefault(r["genome"], []).append(r)
@@ -97,18 +79,10 @@ def main():
                            ("gene", "contig", "start", "stop", "strand", "family", "partition")}}
                           for g in genes if g["RGP"] == rid]
 
-    with open(out / "regions.tsv", "w", newline="") as fh:
-        w = csv.DictWriter(fh, fieldnames=REGION_COLS, delimiter="\t")
-        w.writeheader()
-        w.writerows(rows)
-    with open(out / "region_genes.tsv", "w", newline="") as fh:
-        w = csv.DictWriter(fh, fieldnames=list(gene_rows[0]), delimiter="\t")
-        w.writeheader()
-        w.writerows(gene_rows)
-    with open(out / "versions.txt", "w") as fh:
-        fh.write(f"date: {datetime.now(timezone.utc):%Y-%m-%dT%H:%M:%SZ}\n"
-                 f"python: {sys.version.split()[0]}\nbiopython: {Bio.__version__}\n"
-                 f"min_orfs: {args.min_orfs}\nppanggolin_dir: {ppg.resolve()}\n")
+    write_tsv(out / "regions.tsv", rows, REGION_COLS)
+    write_tsv(out / "region_genes.tsv", gene_rows, GENE_COLS)
+    write_versions(out / "versions.txt", biopython=Bio.__version__,
+                   min_orfs=args.min_orfs, ppanggolin_dir=ppg.resolve())
 
     print(f"{len(all_rgps)} RGPs total, {len(rows)} with >= {args.min_orfs} ORFs "
           f"-> {out}/regions.tsv, {out}/fasta/")

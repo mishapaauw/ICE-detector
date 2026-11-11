@@ -26,13 +26,12 @@ Its outer coordinates give a refined element boundary: dr_left_start..dr_right_e
 Output (in --outdir): dr.tsv, one row per region; versions.txt
 """
 import argparse
-import csv
-import sys
-from datetime import datetime, timezone
 from pathlib import Path
 
 from Bio import SeqIO
 from Bio.Seq import reverse_complement
+
+from common import parse_coordinates, read_fasta_list, read_tsv, write_tsv, write_versions
 
 
 def window(seq, start, end, circular):
@@ -189,21 +188,15 @@ def main():
 
     out = Path(args.outdir)
     out.mkdir(parents=True, exist_ok=True)
-    with open(args.regions) as fh:
-        regions = list(csv.DictReader(fh, delimiter="\t"))
-    genomes, circular = {}, set()
-    with open(args.fasta_list) as fh:
-        for row in csv.reader(fh, delimiter="\t"):
-            if row:
-                genomes[row[0]] = row[1]
-                circular.update(row[2:])
+    regions = read_tsv(args.regions)
+    genomes, circular = read_fasta_list(args.fasta_list)
 
     rows = []
     for genome in sorted({r["genome"] for r in regions}):
         contigs = {rec.id: str(rec.seq).upper() for rec in SeqIO.parse(genomes[genome], "fasta")}
         all_seqs = list(contigs.values())
         for r in (r for r in regions if r["genome"] == genome):
-            segs = [tuple(map(int, p.split(".."))) for p in r["coordinates"].split(",")]
+            segs = parse_coordinates(r["coordinates"])
             start, end = segs[0][0], segs[-1][1]
             if end < start:  # region wraps the origin: express end past the contig length
                 end += len(contigs[r["contig"]])
@@ -211,16 +204,10 @@ def main():
                           r["contig"] in circular)
             rows.append({"region_id": r["region_id"], **res})
 
-    with open(out / "dr.tsv", "w", newline="") as fh:
-        w = csv.DictWriter(fh, fieldnames=FIELDS, delimiter="\t", restval="")
-        w.writeheader()
-        w.writerows(rows)
-    with open(out / "versions.txt", "w") as fh:
-        fh.write(f"date: {datetime.now(timezone.utc):%Y-%m-%dT%H:%M:%SZ}\n"
-                 f"python: {sys.version.split()[0]}\n"
-                 f"outside_bp: {args.outside}\ninside_bp: {args.inside}\n"
-                 f"min_len: {args.min_len}\nmax_copies: {args.max_copies}\n"
-                 f"seed: not applicable (deterministic)\n")
+    write_tsv(out / "dr.tsv", rows, FIELDS)
+    write_versions(out / "versions.txt", outside_bp=args.outside, inside_bp=args.inside,
+                   min_len=args.min_len, max_copies=args.max_copies,
+                   seed="not applicable (deterministic)")
     print(f"DRs found in {sum(r['dr'] for r in rows)} of {len(rows)} regions -> {out / 'dr.tsv'}")
 
 

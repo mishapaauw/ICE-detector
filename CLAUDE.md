@@ -12,6 +12,9 @@ The algorithm should be the following:
 1. Succesfully running ppanggolin on test genome set, generating spot genomic fasta files.
 2. Implementing script that works per spot to detect conjugation systems (2a), relaxases (2b), oriTs (2c), and GC content (2d).
 3. Implementing a final output table with high-confidence ICE spots including the amount of evidence you have.
+4. Shared helper module (`scripts/common.py`) instead of duplicated code; portable `environment.yml`.
+5. Integrase detection (Pfam HMMs, hmmsearch) and tRNA proximity (pyaragorn), both added to the evidence.
+6. Merge neighbouring RGPs (few genes apart) into one region before the `--min-orfs` filter.
 
 ## Layout
 
@@ -38,7 +41,7 @@ The algorithm should be the following:
 - Tools: ppanggolin, HMMER, and macsyfinder (use pip for this one, if required)
 - If tools conflict, use separate environments and tell me why.
 - Verify each tool installation
-- Export the result to `environment.yml` (pinned versions) and commit it.
+- Keep `environment.yml` short and portable (main tools pinned); export the full env to `envs/ICE-detector.osx-arm64.lock.yml` and commit both.
 - Don't install anything outside conda without asking me.
 
 ## Domain specifics

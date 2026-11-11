@@ -15,9 +15,10 @@ Outputs (in --outdir):
                  passing hits, profiles hit (best E-value per profile)
 """
 import argparse
-import csv
 from collections import defaultdict
 from pathlib import Path
+
+from common import find_region, read_tsv, region_segments, write_tsv
 
 TBL_COLS = ["profile", "profile_acc", "contig", "contig_acc", "hmm_from", "hmm_to",
             "ali_from", "ali_to", "env_from", "env_to", "modlen", "strand",
@@ -46,23 +47,6 @@ def read_tblout(path):
     return hits
 
 
-def region_segments(regions):
-    """contig -> [(start, end, region_id)], handling regions that wrap the origin."""
-    segs = defaultdict(list)
-    for r in regions:
-        for part in r["coordinates"].split(","):
-            s, e = map(int, part.split(".."))
-            segs[r["contig"]].append((s, e, r["region_id"]))
-    return segs
-
-
-def find_region(segs, contig, start, end):
-    for s, e, rid in segs.get(contig, []):
-        if start <= e and end >= s:
-            return rid
-    return ""
-
-
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -78,8 +62,7 @@ def main():
 
     out = Path(args.outdir)
     out.mkdir(parents=True, exist_ok=True)
-    with open(args.regions) as fh:
-        regions = list(csv.DictReader(fh, delimiter="\t"))
+    regions = read_tsv(args.regions)
     segs = region_segments(regions)
     plen = profile_lengths(args.hmm)
 
@@ -106,10 +89,7 @@ def main():
     fields = ["genome", "contig", "profile", "start", "end", "strand", "hmm_from", "hmm_to",
               "profile_len", "profile_cov", "evalue", "score", "pass_evalue", "pass_cov",
               "pass", "region_id"]
-    with open(out / "orit_hits.tsv", "w", newline="") as fh:
-        w = csv.DictWriter(fh, fieldnames=fields, delimiter="\t")
-        w.writeheader()
-        w.writerows(sorted(hits, key=lambda h: (h["genome"], h["start"])))
+    write_tsv(out / "orit_hits.tsv", sorted(hits, key=lambda h: (h["genome"], h["start"])), fields)
 
     per_region = defaultdict(list)
     for h in hits:
@@ -128,10 +108,7 @@ def main():
             "orit_profiles": ";".join(f"{p}({e:.1e})" for p, e in sorted(best.items(), key=lambda x: x[1])),
             "orit_best_evalue": f"{min(best.values()):.1e}" if best else "",
         })
-    with open(out / "orit.tsv", "w", newline="") as fh:
-        w = csv.DictWriter(fh, fieldnames=list(rows[0]), delimiter="\t")
-        w.writeheader()
-        w.writerows(rows)
+    write_tsv(out / "orit.tsv", rows)
 
     with open(out / "orit_filters.txt", "w") as fh:
         fh.write(f"max_evalue: {args.max_evalue}\nmin_profile_cov: {args.min_cov}\n")

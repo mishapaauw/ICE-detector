@@ -51,9 +51,15 @@ separately, e.g. with geNomad). See [Input genomes](#input-genomes).
 ## Installation
 
 ```bash
-conda env create -n ICE-detector -f environment.yml
+conda config --set channel_priority strict   # recommended
+conda env create -f environment.yml          # add --solver libmamba if solving is slow
 conda activate ICE-detector
 ```
+
+`environment.yml` pins only the tools the pipeline calls (PPanGGOLiN, MacSyFinder,
+HMMER, pyaragorn, Biopython, numpy, pandas) and solves on macOS and Linux.
+`envs/ICE-detector.osx-arm64.lock.yml` is the full export of the tested macOS
+(arm64) environment, with every package version, for exact reproduction on that platform.
 
 Download the reference data once (stored in `db/`, not tracked by git; see `db/README.md`):
 
@@ -193,7 +199,8 @@ pytest -m slow   # full pipeline on data/test vs tests/expected/test_candidates.
 config/       PPanGGOLiN parameters (seed)
 data/test/    test genomes (read-only)
 db/           downloaded models (gitignored except README.md)
-scripts/      pipeline steps + run_all.py
+envs/         full export of the tested conda env
+scripts/      pipeline steps + run_all.py (shared helpers in common.py)
 tests/        pytest tests and expected outputs
 results/      outputs (gitignored)
 ```

@@ -18,13 +18,12 @@ For each region:
                genome-wide GC variation)
 """
 import argparse
-import csv
-import sys
-from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
 from Bio import SeqIO
+
+from common import parse_coordinates, read_fasta_list, read_tsv, write_tsv, write_versions
 
 
 def counts(seq):
@@ -85,14 +84,8 @@ def main():
 
     out = Path(args.outdir)
     out.mkdir(parents=True, exist_ok=True)
-    with open(args.regions) as fh:
-        regions = list(csv.DictReader(fh, delimiter="\t"))
-    genomes, circular = {}, set()
-    with open(args.fasta_list) as fh:
-        for row in csv.reader(fh, delimiter="\t"):
-            if row:
-                genomes[row[0]] = row[1]
-                circular.update(row[2:])
+    regions = read_tsv(args.regions)
+    genomes, circular = read_fasta_list(args.fasta_list)
 
     rows = []
     for genome in sorted({r["genome"] for r in regions}):
@@ -103,13 +96,10 @@ def main():
         genome_gc = g_gc / g_at
         for r in (r for r in regions if r["genome"] == genome):
             gc, acgt = cnt[r["contig"]]
-            rg = ra = 0
-            for part in r["coordinates"].split(","):
-                s, e = map(int, part.split(".."))
-                rg += int(gc[s - 1:e].sum())
-                ra += int(acgt[s - 1:e].sum())
+            segs = parse_coordinates(r["coordinates"])
+            rg = sum(int(gc[s - 1:e].sum()) for s, e in segs)
+            ra = sum(int(acgt[s - 1:e].sum()) for s, e in segs)
             region_gc = rg / ra
-            segs = [tuple(map(int, p.split(".."))) for p in r["coordinates"].split(",")]
             up, down, both = flank_gc(gc, acgt, segs[0][0], segs[-1][1], args.flank,
                                       r["contig"] in circular)
             rnd = lambda x: round(x, 4) if x is not None else ""
@@ -127,14 +117,9 @@ def main():
                 "gc_diff_flank": rnd(region_gc - both) if both is not None else "",
             })
 
-    with open(out / "gc.tsv", "w", newline="") as fh:
-        w = csv.DictWriter(fh, fieldnames=list(rows[0]), delimiter="\t")
-        w.writeheader()
-        w.writerows(rows)
-    with open(out / "versions.txt", "w") as fh:
-        fh.write(f"date: {datetime.now(timezone.utc):%Y-%m-%dT%H:%M:%SZ}\n"
-                 f"python: {sys.version.split()[0]}\nnumpy: {np.__version__}\n"
-                 f"window_step: {args.step}\nflank_bp: {args.flank}\nseed: not applicable (deterministic)\n")
+    write_tsv(out / "gc.tsv", rows)
+    write_versions(out / "versions.txt", numpy=np.__version__, window_step=args.step,
+                   flank_bp=args.flank, seed="not applicable (deterministic)")
     print(f"GC computed for {len(rows)} regions -> {out / 'gc.tsv'}")
 
 

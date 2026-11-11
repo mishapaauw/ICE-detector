@@ -7,6 +7,7 @@ import pandas as pd
 import pytest
 
 import build_table
+import common
 import extract_regions
 import gc_content
 import make_fasta_list
@@ -63,20 +64,45 @@ def test_extract_chromosomes_allows_same_plasmid_names_across_genomes(tmp_path):
 
 def test_parse_and_cut_coordinates():
     seq = "ABCDEFGHIJ"
-    assert extract_regions.cut_sequence(seq, extract_regions.parse_coordinates("2..4")) == "BCD"
+    assert extract_regions.cut_sequence(seq, common.parse_coordinates("2..4")) == "BCD"
     # region wrapping the origin of a circular contig
-    segs = extract_regions.parse_coordinates("9..10,1..2")
+    segs = common.parse_coordinates("9..10,1..2")
+    assert segs == [(9, 10), (1, 2)]
     assert extract_regions.cut_sequence(seq, segs) == "IJAB"
+
+
+# --- common ---------------------------------------------------------------------
+
+def test_tsv_roundtrip_and_comments(tmp_path):
+    path = tmp_path / "x.tsv"
+    common.write_tsv(path, [{"a": 1, "b": "x"}, {"a": 2}])        # missing b -> ""
+    assert path.read_text() == "a\tb\n1\tx\n2\t\n"
+    path.write_text("# note\na\tb\n1\t2\n")
+    assert common.read_tsv(path, comment="#") == [{"a": "1", "b": "2"}]
+
+
+def test_read_fasta_list(tmp_path):
+    path = tmp_path / "list.tsv"
+    path.write_text("g1\t/x/g1.fasta\tc1\tc2\ng2\t/x/g2.fasta\n\n")
+    genomes, circular = common.read_fasta_list(path)
+    assert genomes == {"g1": "/x/g1.fasta", "g2": "/x/g2.fasta"}
+    assert circular == {"c1", "c2"}
+
+
+def test_region_segments_wrapping_region():
+    segs = common.region_segments([{"region_id": "R", "contig": "c", "coordinates": "90..100,1..10"}])
+    assert common.find_region(segs, "c", 5, 6) == "R"
+    assert common.find_region(segs, "c", 50, 60) == ""
 
 
 # --- summarize_orit ------------------------------------------------------------
 
 def test_orit_region_mapping():
     regions = [{"region_id": "R1", "contig": "c1", "coordinates": "100..200"}]
-    segs = summarize_orit.region_segments(regions)
-    assert summarize_orit.find_region(segs, "c1", 190, 250) == "R1"   # overlaps
-    assert summarize_orit.find_region(segs, "c1", 201, 250) == ""     # just outside
-    assert summarize_orit.find_region(segs, "c2", 150, 160) == ""     # other contig
+    segs = common.region_segments(regions)
+    assert common.find_region(segs, "c1", 190, 250) == "R1"   # overlaps
+    assert common.find_region(segs, "c1", 201, 250) == ""     # just outside
+    assert common.find_region(segs, "c2", 150, 160) == ""     # other contig
 
 
 def test_orit_coverage_filter(tmp_path):
@@ -251,3 +277,4 @@ def test_dr_copies_matches_brute_force(seq):
     genome = (random_dna(3000, 4) + seq + random_dna(2000, 5) + rc(seq) + random_dna(2000, 6)
               + seq[2:] + random_dna(1000, 7) + seq[:-1] + random_dna(500, 8))
     assert direct_repeats.dr_copies(seq, [genome]) == brute_copies(seq, genome)
+

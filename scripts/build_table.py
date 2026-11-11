@@ -37,10 +37,11 @@ estimate of the element boundaries (region start/end come from PPanGGOLiN).
 import argparse
 import shutil
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
+
+from common import write_versions
 
 CATEGORY_ORDER = {"ICE": 0, "dICE": 1, "IME": 2, "iOriT": 3, "ICE_noOriT": 4,
                   "dICE_noOriT": 5, "IME_noOriT": 6, "other": 7, "none": 8}
@@ -144,10 +145,9 @@ def main():
     for rid in ice["region_id"]:
         shutil.copy(res / "regions" / "fasta" / f"{rid}.fasta", fasta_out)
 
-    with open(out / "versions.txt", "w") as fh:
-        fh.write(f"date: {datetime.now(timezone.utc):%Y-%m-%dT%H:%M:%SZ}\n"
-                 f"python: {sys.version.split()[0]}\npandas: {pd.__version__}\n"
-                 f"gc_z: {args.gc_z}\nmin_evidence: {args.min_evidence}\n")
+    write_versions(out / "versions.txt", pandas=pd.__version__, gc_z=args.gc_z,
+                   min_evidence=args.min_evidence)
+    with open(out / "versions.txt", "a") as fh:
         for step in ("ppanggolin", "regions", "conjugation", "orit", "gc", "dr"):
             v = res / step / "versions.txt"
             if v.exists():

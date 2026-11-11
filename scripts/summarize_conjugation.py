@@ -17,15 +17,10 @@ Outputs (in --outdir):
     t4cp, virb4      True if a coupling protein / VirB4 ATPase hit lies in the region
 """
 import argparse
-import csv
 from collections import defaultdict
 from pathlib import Path
 
-
-def read_tsv(path, comment="#"):
-    with open(path) as fh:
-        lines = [l for l in fh if l.strip() and not l.startswith(comment)]
-    return list(csv.DictReader(lines, delimiter="\t"))
+from common import read_tsv, write_tsv
 
 
 def gene_to_rgp(tables_dir):
@@ -40,7 +35,7 @@ def gene_to_rgp(tables_dir):
 def load_hits(msf_dir, rgp_of):
     hits = []
     for best in sorted(Path(msf_dir).glob("*/best_solution.tsv")):
-        for h in read_tsv(best):
+        for h in read_tsv(best, comment="#"):
             if not h.get("hit_id"):
                 continue
             model = h["model_fqn"].split("/")[-1]  # e.g. T4SS_typeG, dCONJ_typeF, MOB
@@ -102,13 +97,6 @@ def summarize(regions, hits, min_frac):
             "n_conj_hits": len(rh),
         })
     return rows
-
-
-def write_tsv(path, rows, fields):
-    with open(path, "w", newline="") as fh:
-        w = csv.DictWriter(fh, fieldnames=fields, delimiter="\t")
-        w.writeheader()
-        w.writerows(rows)
 
 
 def main():
