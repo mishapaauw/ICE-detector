@@ -33,8 +33,10 @@ Outputs (in --outdir):
                       only have atypical GC + DRs. Sorted by category,
                       and evidence
   ice_fasta/          FASTA of each candidate region (copied from regions/fasta)
+start/end: region edges after merging RGPs and extending over mobility genes
+(rgp_start/rgp_end: the PPanGGOLiN edges; extended_left/right: genes added).
 element_start/element_end: outer edges of the DR pair, when found; a refined
-estimate of the element boundaries (region start/end come from PPanGGOLiN).
+estimate of the element boundaries.
   versions.txt        settings + versions.txt of every upstream step
 """
 import argparse
@@ -147,7 +149,8 @@ def main():
             "gc_zscore", "flank_up_gc", "flank_down_gc", "flank_gc", "gc_diff_flank",
             "dr_length", "dr_seq", "dr_genome_copies", "dr_left_start", "dr_left_end",
             "dr_right_start", "dr_right_end", "dr_left_offset", "dr_right_offset",
-            "coordinates", "contig_border", "rgp_ids", "n_merged"]
+            "coordinates", "contig_border", "rgp_ids", "n_merged", "rgp_start", "rgp_end",
+            "extended_left", "extended_right", "extended_by"]
     df = df[cols].sort_values(
         ["category", "evidence_count", "genome", "start"],
         key=lambda s: s.map(CATEGORY_ORDER) if s.name == "category" else s,

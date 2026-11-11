@@ -13,14 +13,15 @@ what was kept and dropped.
 Steps (each writes its own subfolder with versions.txt):
     1. genomes.fasta.list  (make_fasta_list.py) + input_contigs.tsv
     2. ppanggolin/          (run_ppanggolin.sh)
-    3. regions/             (extract_regions.py)
-    4. conjugation/         (detect_conjugation.sh + summarize_conjugation.py)
-    4b. integrase/          (detect_integrase.sh + summarize_integrase.py)
-    5. orit/                (detect_orit.sh + summarize_orit.py)
-    6. gc/                  (gc_content.py)
-    6b. dr/                 (direct_repeats.py)
-    6c. trna/               (predict_trnas.py before step 3; trna_proximity.py)
-    7. final/               (build_table.py): ice_candidates.tsv, all_regions.tsv, ice_fasta/
+    3. whole-genome searches, needed to define the regions:
+       trna/ (predict_trnas.py), conjugation/ (detect_conjugation.sh: MacSyFinder),
+       integrase/ (detect_integrase.sh: hmmsearch)
+    4. regions/             (extract_regions.py): RGPs merged and edges extended over
+                            mobility genes; every later step uses these regions
+    5. per-region evidence: conjugation/ (summarize_conjugation.py), integrase/
+       (summarize_integrase.py), orit/ (detect_orit.sh + summarize_orit.py),
+       gc/ (gc_content.py), dr/ (direct_repeats.py), trna/ (trna_proximity.py)
+    6. final/               (build_table.py): ice_candidates.tsv, all_regions.tsv, ice_fasta/
 Reference data must be in db/ first (see db/README.md).
 """
 import argparse
@@ -51,6 +52,9 @@ def main():
     ap.add_argument("--merge-gap", type=int, default=3,
                     help="merge neighbouring RGPs at most this many genes apart "
                          "(default: 3; 0 = no merging)")
+    ap.add_argument("--extend-gap", type=int, default=3,
+                    help="extend region edges over a relaxase, conjugation or integrase gene "
+                         "at most this many genes outside the edge (default: 3; 0 = off)")
     ap.add_argument("--linear", action="store_true", help="treat contigs as linear")
     ap.add_argument("--skip-ppanggolin", action="store_true",
                     help="reuse an existing <outdir>/ppanggolin")
@@ -125,7 +129,7 @@ def preflight(args):
 
 
 def run_steps(args, out, logs, fasta_list, chrom_dir):
-    """Steps 1-6c; they read the genomes through fasta_list (copies in chrom_dir)."""
+    """Steps 1-5; they read the genomes through fasta_list (copies in chrom_dir)."""
     py = sys.executable
     cmd = [py, SCRIPTS / "make_fasta_list.py", args.input_dir, "-o", fasta_list,
            "--chromosome-dir", chrom_dir, "--report", out / "input_contigs.tsv"]
@@ -140,25 +144,28 @@ def run_steps(args, out, logs, fasta_list, chrom_dir):
     run([py, SCRIPTS / "predict_trnas.py", "--fasta-list", fasta_list, "-o", out / "trna"],
         logs / "predict_trnas.log")
 
-    run([py, SCRIPTS / "extract_regions.py", "--ppanggolin", out / "ppanggolin",
-         "--fasta-list", fasta_list, "-o", out / "regions", "--min-orfs", args.min_orfs,
-         "--merge-gap", args.merge_gap, "--trnas", out / "trna" / "trnas.tsv"],
-        logs / "extract_regions.log")
-
     conj = out / "conjugation"
     if not args.skip_macsyfinder:
         run(["bash", SCRIPTS / "detect_conjugation.sh", out / "ppanggolin", conj, args.cpu,
              args.models_dir, "linear" if args.linear else "circular"],
             logs / "detect_conjugation.log")
+    integ = out / "integrase"
+    if not args.skip_hmmsearch:
+        run(["bash", SCRIPTS / "detect_integrase.sh", conj / "proteins", integ, args.cpu,
+             args.integrase_hmm], logs / "detect_integrase.log")
+
+    run([py, SCRIPTS / "extract_regions.py", "--ppanggolin", out / "ppanggolin",
+         "--fasta-list", fasta_list, "-o", out / "regions", "--min-orfs", args.min_orfs,
+         "--merge-gap", args.merge_gap, "--trnas", out / "trna" / "trnas.tsv",
+         "--macsyfinder", conj / "macsyfinder", "--integrase", integ / "hmmsearch",
+         "--extend-gap", args.extend_gap],
+        logs / "extract_regions.log")
+
     run([py, SCRIPTS / "summarize_conjugation.py", "--regions", out / "regions" / "regions.tsv",
          "--region-genes", out / "regions" / "region_genes.tsv",
          "--tables", out / "ppanggolin" / "table", "--macsyfinder", conj / "macsyfinder",
          "-o", conj], logs / "summarize_conjugation.log")
 
-    integ = out / "integrase"
-    if not args.skip_hmmsearch:
-        run(["bash", SCRIPTS / "detect_integrase.sh", conj / "proteins", integ, args.cpu,
-             args.integrase_hmm], logs / "detect_integrase.log")
     run([py, SCRIPTS / "summarize_integrase.py", "--regions", out / "regions" / "regions.tsv",
          "--region-genes", out / "regions" / "region_genes.tsv",
          "--hmmsearch", integ / "hmmsearch", "-o", integ], logs / "summarize_integrase.log")

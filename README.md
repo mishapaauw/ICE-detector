@@ -20,6 +20,14 @@ Approach (after Cury et al. 2017 and Ares-Arroyo et al. 2026; see [References](#
    merged across a tRNA/tmRNA gene, which usually marks the integration site of a
    separate element. A merged region keeps the ID of its largest RGP; `rgp_ids`
    lists all parts.
+   Region edges are then **extended over mobility genes**: if one of the 3 genes
+   (`--extend-gap`) just outside an edge carries a relaxase, a conjugation-system
+   gene (MacSyFinder) or a tyrosine/serine integrase, the edge moves outward to
+   include it, and the search repeats from the new edge. Such genes are often
+   called persistent by PPanGGOLiN when the element is common in the genome set,
+   and are then left outside the RGP. Extension stops at a tRNA/tmRNA and at genes
+   of another region. All later steps (oriT, GC, DRs, tRNA, FASTA, final table)
+   use the extended edges; `rgp_start`/`rgp_end` keep the PPanGGOLiN edges.
    Each region with at least `--min-orfs` genes (counted after merging) is scored for:
    - a **conjugation system** (T4SS): MacSyFinder + CONJScan, chromosome models
    - a **relaxase** (MOB families, from the same CONJScan run)
@@ -96,6 +104,7 @@ python scripts/run_all.py data/test -o results/test --cpu 8
 |---|---|---|
 | `--min-orfs` | 10 | keep only regions with at least this many genes (after merging) |
 | `--merge-gap` | 3 | merge neighbouring RGPs at most this many genes apart; 0 = no merging |
+| `--extend-gap` | 3 | extend region edges over a relaxase / conjugation / integrase gene at most this many genes outside the edge; 0 = off |
 | `--min-evidence` | 2 | minimum evidence count (of 7) for `ice_candidates.tsv` |
 | `--orit-min-cov` | 0.7 | an oriT hit must cover this fraction of its HMM profile |
 | `--orit-max-evalue` | 0.01 | maximum E-value of an oriT hit |
@@ -149,6 +158,8 @@ Key columns:
 | `genome`, `contig`, `start`, `end`, `length`, `n_orfs` | location of the region |
 | `spot_id`, `spot_n_genomes` | PPanGGOLiN spot, and how many genomes have a region in it (spot labels change between runs; compare runs on `region_id`). Merged regions list all their spots (`spot_3;spot_7`) and give the largest genome count |
 | `rgp_ids`, `n_merged` | PPanGGOLiN RGPs merged into this region (`;`-joined, genomic order) and how many |
+| `rgp_start`, `rgp_end` | region edges as PPanGGOLiN made them (before merging/extension changed `start`/`end`) |
+| `extended_left`, `extended_right`, `extended_by` | genes added at each edge by extension, and the mobility genes that triggered it (e.g. `MOBQ`, `Tyr`, `T4SS`) |
 | `category` | `ICE`, `dICE`, `IME`, `iOriT`, `ICE_noOriT`, `dICE_noOriT`, `IME_noOriT`, `other`, `none` (see table above) |
 | `mobility_genes` | what was found, joined by `+`: `T4SS`, `dCONJ`, `MOB` (relaxase), `oriT`; e.g. `T4SS+MOB` = ICE without a detected oriT |
 | `evidence_count` | number of: `t4ss`, `relaxase`, `orit`, `integrase`, `trna`, `gc_atypical`, `dr` |
@@ -184,7 +195,10 @@ pytest -m slow   # full pipeline on data/test vs tests/expected/test_candidates.
 - Region boundaries come from PPanGGOLiN, refined only when a DR pair is found.
   Neighbouring RGPs are merged by gene distance only, so two separate elements
   that sit within `--merge-gap` genes of each other, with no tRNA between them,
-  also end up in one region (check `rgp_ids`). RGPs that span the origin of a circular chromosome are not merged.
+  also end up in one region (check `rgp_ids`).
+- Edge extension can pull a conserved system into a small region: a 5-gene RGP
+  next to the species-wide type-T T4SS becomes a 15-gene `other` (T4SS) region.
+  Check `extended_by` and `rgp_start`/`rgp_end` for such cases. RGPs that span the origin of a circular chromosome are not merged.
   Refinement using gene frequencies within the spot (as in Cury et al. 2017) is
   not implemented.
 - DRs: only exact repeats are found. A diverged or deleted attR copy (seen in one

@@ -9,6 +9,17 @@ RGPs are never merged across a tRNA/tmRNA gene (with --trnas): a tRNA between tw
 RGPs usually marks the integration site of a separate element. RGPs that wrap the
 origin of a circular contig are never merged.
 
+Edge extension (--extend-gap, with --macsyfinder and/or --integrase): when one of
+the --extend-gap genes just outside a region edge carries a relaxase, a
+conjugation-system gene (MacSyFinder/CONJScan) or a tyrosine/serine integrase,
+the edge is moved outward to include it (and the genes in between); this repeats
+from the new edge. Such genes are often labelled persistent when the element is
+common in the genome set, and PPanGGOLiN then leaves them outside the RGP.
+Extension stops at a tRNA/tmRNA, at genes of another RGP and at contig ends,
+and is not done for regions that wrap the origin. The --min-orfs filter is
+applied after merging and extension. All later steps (FASTA, oriT, GC, DR,
+tRNA, final table) use the extended coordinates.
+
 Inputs (from a PPanGGOLiN output folder):
   regions_of_genomic_plasticity.tsv, spots.tsv, table/<genome>.tsv
 Outputs (in --outdir):
@@ -29,7 +40,8 @@ from common import parse_coordinates, read_fasta_list, read_tsv, write_tsv, writ
 
 REGION_COLS = ["region_id", "spot_id", "genome", "contig", "start", "end",
                "length", "n_orfs", "coordinates", "contig_border", "whole_contig",
-               "rgp_ids", "n_merged"]
+               "rgp_ids", "n_merged", "rgp_start", "rgp_end", "extended_left",
+               "extended_right", "extended_by"]
 GENE_COLS = ["region_id", "gene", "contig", "start", "stop", "strand", "family", "partition"]
 
 
@@ -83,6 +95,60 @@ def merge_rgps(rgps, pos, gap, trnas=None):
     return sorted(groups, key=lambda g: order[g[0]["region"]])
 
 
+def mobility_genes(msf_dir=None, integrase_dir=None):
+    """genome -> {gene -> labels}: relaxase family (MOBQ...), T4SS, dCONJ, Tyr, Ser."""
+    from summarize_conjugation import load_hits, relaxase_family
+    from summarize_integrase import INTEGRASE_ROLES, ROLES, read_domtbl
+    mob = {}
+    if msf_dir:
+        for h in load_hits(Path(msf_dir), {}, {}):
+            label = relaxase_family(h["gene_name"]) or (
+                "dCONJ" if h["model"].startswith("dCONJ") else "T4SS")
+            mob.setdefault(h["genome"], {}).setdefault(h["hit_id"], set()).add(label)
+    for tbl in sorted(Path(integrase_dir).glob("*.domtbl")) if integrase_dir else []:
+        for h in read_domtbl(tbl):
+            if ROLES.get(h["accession"]) in INTEGRASE_ROLES:
+                mob.setdefault(tbl.stem, {}).setdefault(h["gene"], set()).add(
+                    ROLES[h["accession"]])
+    return mob
+
+
+def extend_edges(cgenes, lo, hi, mobility, gap, blocked, trnas=()):
+    """Move region edges (gene indices lo..hi in cgenes) outward over mobility genes.
+
+    cgenes: genes of one contig in genomic order (dicts: gene, start, stop);
+    mobility: gene -> labels; gap: how many genes beyond the edge are inspected;
+    blocked: gene IDs that may not be taken (other RGPs/regions);
+    trnas: [(start, end)] on this contig; extension never crosses a tRNA.
+    Returns (lo, hi, n_added_left, n_added_right, sorted labels of the triggering genes).
+    """
+    labels = set()
+
+    def crosses_trna(a, b):  # a tRNA between gene a and gene b (a before b)
+        return trna_between({"c": trnas}, "c", int(cgenes[a]["stop"]), int(cgenes[b]["start"]))
+
+    def walk(edge, step):
+        while True:
+            hit = None
+            for k in range(1, gap + 1):
+                j = edge + step * k
+                if not 0 <= j < len(cgenes) or cgenes[j]["gene"] in blocked:
+                    break
+                if crosses_trna(min(j, j - step), max(j, j - step)):
+                    break
+                if cgenes[j]["gene"] in mobility:
+                    hit = j
+                    break
+            if hit is None:
+                return edge
+            labels.update(mobility[cgenes[hit]["gene"]])
+            edge = hit
+
+    new_lo = walk(lo, -1) if gap > 0 else lo
+    new_hi = walk(hi, +1) if gap > 0 else hi
+    return new_lo, new_hi, lo - new_lo, new_hi - hi, sorted(labels)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -92,6 +158,13 @@ def main():
     ap.add_argument("--min-orfs", type=int, default=10,
                     help="keep regions with at least this many genes (default: 10)")
     ap.add_argument("--trnas", help="trnas.tsv (predict_trnas.py): do not merge across a tRNA")
+    ap.add_argument("--macsyfinder", help="MacSyFinder output folder (one subfolder per "
+                    "genome): relaxase / conjugation genes for edge extension")
+    ap.add_argument("--integrase", help="folder with <genome>.domtbl (detect_integrase.sh): "
+                    "integrases for edge extension")
+    ap.add_argument("--extend-gap", type=int, default=3,
+                    help="extend region edges over a mobility gene at most this many genes "
+                         "outside the edge (default: 3; 0 = no extension)")
     ap.add_argument("--merge-gap", type=int, default=3,
                     help="merge neighbouring RGPs at most this many genes apart "
                          "(default: 3; 0 = no merging)")
@@ -112,31 +185,48 @@ def main():
     for r in all_rgps:
         by_genome.setdefault(r["genome"], []).append(r)
 
-    rows, gene_rows, n_merged_regions = [], [], 0
+    all_mobility = mobility_genes(args.macsyfinder, args.integrase)
+    rows, gene_rows, n_merged_regions, n_extended = [], [], 0, 0
     for genome, rgps in sorted(by_genome.items()):
         genes = read_tsv(ppg / "table" / f"{genome}.tsv")
         pos = gene_positions(genes)
+        by_contig = {}
+        for g in sorted(genes, key=lambda g: int(g["start"])):
+            by_contig.setdefault(g["contig"], []).append(g)
+        mobility = all_mobility.get(genome, {})
+        blocked = {g["gene"] for g in genes if g["RGP"]}
+        genome_trnas = trnas.get(genome, {})
         contigs = None
-        for group in merge_rgps(rgps, pos, args.merge_gap, trnas.get(genome)):
+        for group in merge_rgps(rgps, pos, args.merge_gap, genome_trnas):
             first, last = group[0], group[-1]
             # merged regions keep the ID of their largest RGP (stable between settings)
             rid = max(group, key=lambda r: int(r["genes"]))["region"]
             contig = first["contig"]
-            if len(group) == 1:
-                members = {rid}
+            cgenes = by_contig[contig]
+            ext = (0, 0, [])
+            if "," in first["coordinates"]:  # wraps the origin: kept as PPanGGOLiN made it
                 region_genes = [g for g in genes if g["RGP"] == rid]
                 n_orfs, coords = int(first["genes"]), first["coordinates"]
                 start, end, length = first["start"], first["stop"], int(first["length"])
             else:
                 lo, hi = pos[first["first_gene"]][1], pos[last["last_gene"]][1]
-                region_genes = [g for g in genes if pos[g["gene"]][0] == contig
-                                and lo <= pos[g["gene"]][1] <= hi]
-                n_orfs = len(region_genes)
-                start, end = first["start"], last["stop"]
-                coords, length = f"{start}..{end}", int(end) - int(start) + 1
+                lo2, hi2, *ext = extend_edges(cgenes, lo, hi, mobility, args.extend_gap,
+                                              blocked, genome_trnas.get(contig, ()))
+                region_genes = cgenes[lo2:hi2 + 1]
+                blocked.update(g["gene"] for g in region_genes)
+                if len(group) == 1 and (lo2, hi2) == (lo, hi):
+                    # unchanged RGP: keep PPanGGOLiN's coordinates and gene count
+                    n_orfs, coords = int(first["genes"]), first["coordinates"]
+                    start, end, length = first["start"], first["stop"], int(first["length"])
+                else:
+                    n_orfs = len(region_genes)
+                    start = min(int(first["start"]), int(cgenes[lo2]["start"]))
+                    end = max(int(last["stop"]), max(int(g["stop"]) for g in region_genes))
+                    coords, length = f"{start}..{end}", end - start + 1
             if n_orfs < args.min_orfs:
                 continue
             n_merged_regions += len(group) > 1
+            n_extended += bool(ext[0] or ext[1])
             if contigs is None:
                 contigs = {rec.id: rec.seq for rec in SeqIO.parse(genome_paths[genome], "fasta")}
             seq = cut_sequence(contigs[contig], parse_coordinates(coords))
@@ -157,6 +247,9 @@ def main():
                 "contig_border": any(r["contigBorder"] == "True" for r in group),
                 "whole_contig": any(r["wholeContig"] == "True" for r in group),
                 "rgp_ids": ";".join(r["region"] for r in group), "n_merged": len(group),
+                "rgp_start": first["start"], "rgp_end": last["stop"],
+                "extended_left": ext[0], "extended_right": ext[1],
+                "extended_by": ",".join(ext[2]),
             })
             gene_rows += [{"region_id": rid, **{k: g[k] for k in GENE_COLS[1:]}}
                           for g in region_genes]
@@ -167,12 +260,16 @@ def main():
     write_tsv(out / "region_genes.tsv", gene_rows, GENE_COLS)
     write_versions(out / "versions.txt", biopython=Bio.__version__,
                    min_orfs=args.min_orfs, merge_gap=args.merge_gap,
-                   merge_blocked_by_trna=bool(args.trnas),
+                   merge_blocked_by_trna=bool(args.trnas), extend_gap=args.extend_gap,
+                   extension_evidence=", ".join(
+                       x for x, v in (("macsyfinder", args.macsyfinder),
+                                      ("integrase", args.integrase)) if v) or "none",
                    ppanggolin_dir=ppg.resolve())
 
     print(f"{len(all_rgps)} RGPs total; {len(rows)} regions with >= {args.min_orfs} ORFs, "
           f"{n_merged_regions} of them merged from neighbouring RGPs "
-          f"(--merge-gap {args.merge_gap}) -> {out}/regions.tsv, {out}/fasta/")
+          f"(--merge-gap {args.merge_gap}), {n_extended} extended over mobility genes "
+          f"(--extend-gap {args.extend_gap}) -> {out}/regions.tsv, {out}/fasta/")
 
 
 if __name__ == "__main__":

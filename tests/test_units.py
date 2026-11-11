@@ -366,7 +366,9 @@ def test_build_table_counts_seven_evidence_items(tmp_path):
     tsv("regions/regions.tsv", [{"region_id": r, "spot_id": "spot_1", "genome": "g", "contig": "c",
                                  "start": 1, "end": 100, "length": 100, "n_orfs": 10,
                                  "coordinates": "1..100", "contig_border": False,
-                                 "whole_contig": False, "rgp_ids": r, "n_merged": 1}
+                                 "whole_contig": False, "rgp_ids": r, "n_merged": 1,
+                                 "rgp_start": 1, "rgp_end": 100, "extended_left": 0,
+                                 "extended_right": 0, "extended_by": ""}
                                 for r in rid])
     tsv("conjugation/conjugation.tsv", [
         {"region_id": "R1", "conj_system": True, "conj_systems": "x", "dconj_system": False,
@@ -460,3 +462,36 @@ def test_merge_rgps_blocked_by_trna_in_gap():
     assert merged(extract_regions.merge_rgps(rgps, pos, 3, {"c1": [(1050, 1125)]})) == [["A"], ["B"]]
     assert merged(extract_regions.merge_rgps(rgps, pos, 3, {"c1": [(5000, 5075)]})) == [["A", "B"]]
     assert merged(extract_regions.merge_rgps(rgps, pos, 3, {"c2": [(1050, 1125)]})) == [["A", "B"]]
+
+
+
+# --- extract_regions: extending edges over mobility genes ----------------------------------
+
+def contig_genes(n):
+    """n genes of 900 bp, 100 bp apart: gene i spans 1000*i+1 .. 1000*i+900."""
+    return [{"gene": f"g{i}", "start": str(1000 * i + 1), "stop": str(1000 * i + 900)}
+            for i in range(n)]
+
+
+def test_extend_edges_over_adjacent_relaxase_and_chain():
+    cg = contig_genes(40)
+    mob = {"g9": {"MOBQ"}, "g31": {"T4SS"}, "g33": {"T4SS"}, "g36": {"Tyr"}}
+    lo, hi, left, right, labels = extract_regions.extend_edges(cg, 10, 30, mob, 3, set())
+    assert (lo, left) == (9, 1)                 # relaxase right next to the left edge
+    assert (hi, right) == (36, 6)               # g31 -> g33 -> g36, each <= 3 genes further
+    assert labels == ["MOBQ", "T4SS", "Tyr"]
+
+
+def test_extend_edges_limits():
+    cg = contig_genes(40)
+    mob = {"g6": {"MOBQ"}, "g32": {"Tyr"}, "g1": {"T4SS"}}
+    # g6 is 4 genes from the edge: too far with gap 3
+    assert extract_regions.extend_edges(cg, 10, 30, mob, 3, set())[:2] == (10, 32)
+    # gap 0 = no extension
+    assert extract_regions.extend_edges(cg, 10, 30, mob, 0, set())[:2] == (10, 30)
+    # blocked by a gene of another RGP, and by a tRNA between g30 and g31
+    assert extract_regions.extend_edges(cg, 10, 30, mob, 3, {"g31"})[:2] == (10, 30)
+    assert extract_regions.extend_edges(cg, 10, 30, mob, 3, set(), [(30920, 30990)])[:2] == (10, 30)
+    # contig start: never below index 0
+    assert extract_regions.extend_edges(cg, 2, 4, {"g1": {"T4SS"}}, 3, set())[:2] == (1, 4)
+    assert extract_regions.extend_edges(cg, 0, 4, {}, 3, set())[:2] == (0, 4)
