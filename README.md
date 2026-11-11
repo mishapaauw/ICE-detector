@@ -16,8 +16,10 @@ Approach (after Cury et al. 2017 and Ares-Arroyo et al. 2026; see [References](#
    genomic plasticity (RGPs), grouped into *spots* (insertion sites shared across genomes).
 2. Neighbouring RGPs on the same chromosome that are at most `--merge-gap` (3)
    genes apart are merged into one region: an element is often split into
-   several RGPs by a gene that is persistent in the pangenome. A merged region
-   keeps the ID of its largest RGP; `rgp_ids` lists all parts.
+   several RGPs by a gene that is persistent in the pangenome. RGPs are not
+   merged across a tRNA/tmRNA gene, which usually marks the integration site of a
+   separate element. A merged region keeps the ID of its largest RGP; `rgp_ids`
+   lists all parts.
    Each region with at least `--min-orfs` genes (counted after merging) is scored for:
    - a **conjugation system** (T4SS): MacSyFinder + CONJScan, chromosome models
    - a **relaxase** (MOB families, from the same CONJScan run)
@@ -181,8 +183,8 @@ pytest -m slow   # full pipeline on data/test vs tests/expected/test_candidates.
   assemblies lose most of their sequence.
 - Region boundaries come from PPanGGOLiN, refined only when a DR pair is found.
   Neighbouring RGPs are merged by gene distance only, so two separate elements
-  that sit within `--merge-gap` genes of each other also end up in one region
-  (check `rgp_ids`). RGPs that span the origin of a circular chromosome are not merged.
+  that sit within `--merge-gap` genes of each other, with no tRNA between them,
+  also end up in one region (check `rgp_ids`). RGPs that span the origin of a circular chromosome are not merged.
   Refinement using gene frequencies within the spot (as in Cury et al. 2017) is
   not implemented.
 - DRs: only exact repeats are found. A diverged or deleted attR copy (seen in one

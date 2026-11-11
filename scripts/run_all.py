@@ -19,7 +19,7 @@ Steps (each writes its own subfolder with versions.txt):
     5. orit/                (detect_orit.sh + summarize_orit.py)
     6. gc/                  (gc_content.py)
     6b. dr/                 (direct_repeats.py)
-    6c. trna/               (trna_proximity.py)
+    6c. trna/               (predict_trnas.py before step 3; trna_proximity.py)
     7. final/               (build_table.py): ice_candidates.tsv, all_regions.tsv, ice_fasta/
 Reference data must be in db/ first (see db/README.md).
 """
@@ -137,9 +137,12 @@ def run_steps(args, out, logs, fasta_list, chrom_dir):
         run(["bash", SCRIPTS / "run_ppanggolin.sh", fasta_list, out / "ppanggolin", args.cpu],
             logs / "ppanggolin.log")
 
+    run([py, SCRIPTS / "predict_trnas.py", "--fasta-list", fasta_list, "-o", out / "trna"],
+        logs / "predict_trnas.log")
+
     run([py, SCRIPTS / "extract_regions.py", "--ppanggolin", out / "ppanggolin",
          "--fasta-list", fasta_list, "-o", out / "regions", "--min-orfs", args.min_orfs,
-         "--merge-gap", args.merge_gap],
+         "--merge-gap", args.merge_gap, "--trnas", out / "trna" / "trnas.tsv"],
         logs / "extract_regions.log")
 
     conj = out / "conjugation"
@@ -179,7 +182,7 @@ def run_steps(args, out, logs, fasta_list, chrom_dir):
          "--max-copies", args.dr_max_copies], logs / "direct_repeats.log")
 
     run([py, SCRIPTS / "trna_proximity.py", "--regions", out / "regions" / "regions.tsv",
-         "--fasta-list", fasta_list, "--dr", out / "dr" / "dr.tsv", "-o", out / "trna",
+         "--trnas", out / "trna" / "trnas.tsv", "--dr", out / "dr" / "dr.tsv", "-o", out / "trna",
          "--dist", args.trna_dist], logs / "trna_proximity.log")
 
 

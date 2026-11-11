@@ -5,7 +5,9 @@ Neighbouring RGPs on the same contig that are at most --merge-gap genes apart ar
 merged into one region first: one element is often split into several RGPs by a
 gene that is persistent in the pangenome (e.g. a cargo gene shared with the core).
 The --min-orfs filter is applied to the merged region, so the pieces are not lost.
-RGPs that wrap the origin of a circular contig are never merged.
+RGPs are never merged across a tRNA/tmRNA gene (with --trnas): a tRNA between two
+RGPs usually marks the integration site of a separate element. RGPs that wrap the
+origin of a circular contig are never merged.
 
 Inputs (from a PPanGGOLiN output folder):
   regions_of_genomic_plasticity.tsv, spots.tsv, table/<genome>.tsv
@@ -47,10 +49,17 @@ def gene_positions(genes):
     return pos
 
 
-def merge_rgps(rgps, pos, gap):
-    """Group RGPs of one genome that are <= gap genes apart on the same contig.
+def trna_between(trnas, contig, left_end, right_start):
+    """True if a tRNA on contig overlaps the gap left_end < x < right_start."""
+    return any(s < right_start and e > left_end for s, e in trnas.get(contig, ()))
 
-    rgps: RGP rows (first_gene, last_gene, coordinates, ...); pos: gene_positions().
+
+def merge_rgps(rgps, pos, gap, trnas=None):
+    """Group RGPs of one genome that are <= gap genes apart on the same contig,
+    with no tRNA/tmRNA in between.
+
+    rgps: RGP rows (first_gene, last_gene, start, stop, coordinates, ...);
+    pos: gene_positions(); trnas: {contig: [(start, end), ...]} or None.
     Returns lists of RGPs, each in genomic order, ordered by the input position
     of their first member (so gap=0 keeps the input order).
     """
@@ -63,7 +72,9 @@ def merge_rgps(rgps, pos, gap):
             prev = groups[-1][-1] if groups and "," not in groups[-1][-1]["coordinates"] else None
             if prev is not None:
                 (c1, i1), (c2, i2) = pos[prev["last_gene"]], pos[r["first_gene"]]
-                if c1 == c2 and 0 <= i2 - i1 - 1 <= gap:
+                if (c1 == c2 and 0 <= i2 - i1 - 1 <= gap and
+                        not (trnas and trna_between(trnas, c1, int(prev["stop"]),
+                                                    int(r["start"])))):
                     groups[-1].append(r)
                     continue
             groups.append([r])
@@ -80,6 +91,7 @@ def main():
     ap.add_argument("-o", "--outdir", required=True)
     ap.add_argument("--min-orfs", type=int, default=10,
                     help="keep regions with at least this many genes (default: 10)")
+    ap.add_argument("--trnas", help="trnas.tsv (predict_trnas.py): do not merge across a tRNA")
     ap.add_argument("--merge-gap", type=int, default=3,
                     help="merge neighbouring RGPs at most this many genes apart "
                          "(default: 3; 0 = no merging)")
@@ -92,6 +104,10 @@ def main():
     spot_of = {r["rgp_id"]: r["spot_id"] for r in read_tsv(ppg / "spots.tsv")}
     all_rgps = read_tsv(ppg / "regions_of_genomic_plasticity.tsv")
     genome_paths, _ = read_fasta_list(args.fasta_list)
+    trnas = {}
+    for t in (read_tsv(args.trnas) if args.trnas else []):
+        trnas.setdefault(t["genome"], {}).setdefault(t["contig"], []).append(
+            (int(t["start"]), int(t["end"])))
     by_genome = {}
     for r in all_rgps:
         by_genome.setdefault(r["genome"], []).append(r)
@@ -101,7 +117,7 @@ def main():
         genes = read_tsv(ppg / "table" / f"{genome}.tsv")
         pos = gene_positions(genes)
         contigs = None
-        for group in merge_rgps(rgps, pos, args.merge_gap):
+        for group in merge_rgps(rgps, pos, args.merge_gap, trnas.get(genome)):
             first, last = group[0], group[-1]
             # merged regions keep the ID of their largest RGP (stable between settings)
             rid = max(group, key=lambda r: int(r["genes"]))["region"]
@@ -151,6 +167,7 @@ def main():
     write_tsv(out / "region_genes.tsv", gene_rows, GENE_COLS)
     write_versions(out / "versions.txt", biopython=Bio.__version__,
                    min_orfs=args.min_orfs, merge_gap=args.merge_gap,
+                   merge_blocked_by_trna=bool(args.trnas),
                    ppanggolin_dir=ppg.resolve())
 
     print(f"{len(all_rgps)} RGPs total; {len(rows)} regions with >= {args.min_orfs} ORFs, "

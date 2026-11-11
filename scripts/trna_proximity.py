@@ -3,7 +3,7 @@
 
 Many ICEs and other genomic islands integrate into the 3' end of a tRNA or tmRNA
 gene, so a tRNA at one end of a region is supporting evidence for an integrated
-element. tRNAs/tmRNAs are predicted with ARAGORN (pyaragorn, genetic code 11).
+element. tRNAs/tmRNAs come from predict_trnas.py (ARAGORN via pyaragorn).
 
 Per region:
   trna_adjacent   True if a tRNA/tmRNA lies within --dist bp of a region end
@@ -13,31 +13,13 @@ Per region:
   trna_dist       bp between the gene and that end (0 = overlaps the end)
   trna_dr_overlap True if the gene overlaps a DR copy (att site inside the tRNA)
 
-Inputs: regions.tsv, the fasta list (contigs, circular flags), optional dr/dr.tsv.
-Outputs (in --outdir): trnas.tsv (all predicted genes), trna.tsv (per region), versions.txt
+Inputs: regions.tsv, trnas.tsv (predict_trnas.py), optional dr/dr.tsv.
+Outputs (in --outdir): trna.tsv (per region); settings appended to versions.txt
 """
 import argparse
 from pathlib import Path
 
-import pyaragorn
-from Bio import SeqIO
-
-from common import parse_coordinates, read_fasta_list, read_tsv, write_tsv, write_versions
-
-
-def predict(seq, circular):
-    """tRNA/tmRNA genes of one contig: list of dicts with 1-based start <= end."""
-    finder = pyaragorn.RNAFinder(translation_table=11, trna=True, tmrna=True, linear=not circular)
-    genes = []
-    for g in finder.find_rna(seq):
-        start, end = sorted((g.begin, g.end))
-        if g.type == "tRNA":
-            name = f"tRNA-{g.amino_acid}({g.anticodon.lower()})"
-        else:
-            name = g.type
-        genes.append({"type": g.type, "name": name, "start": start, "end": end,
-                      "strand": "+" if g.strand > 0 else "-"})
-    return genes
+from common import parse_coordinates, read_tsv, write_tsv
 
 
 def point_distance(p, start, end, n, circular):
@@ -79,7 +61,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--regions", required=True, help="regions/regions.tsv")
-    ap.add_argument("--fasta-list", required=True)
+    ap.add_argument("--trnas", required=True, help="trnas.tsv from predict_trnas.py")
     ap.add_argument("--dr", help="dr/dr.tsv (optional): also count tRNAs overlapping a DR copy")
     ap.add_argument("-o", "--outdir", required=True)
     ap.add_argument("--dist", type=int, default=1000,
@@ -89,32 +71,30 @@ def main():
     out = Path(args.outdir)
     out.mkdir(parents=True, exist_ok=True)
     regions = read_tsv(args.regions)
-    genomes, circular = read_fasta_list(args.fasta_list)
     dr = {r["region_id"]: r for r in read_tsv(args.dr)} if args.dr else {}
+    genes, contig_info = {}, {}
+    for g in read_tsv(args.trnas):
+        g["start"], g["end"] = int(g["start"]), int(g["end"])
+        genes.setdefault(g["contig"], []).append(g)
+        contig_info[g["contig"]] = (int(g["contig_length"]), g["circular"] == "True")
 
-    all_genes, rows = [], []
-    for genome in sorted(genomes):
-        contigs = {rec.id: str(rec.seq).upper() for rec in SeqIO.parse(genomes[genome], "fasta")}
-        genes = {}
-        for cid, seq in contigs.items():
-            genes[cid] = predict(seq, cid in circular)
-            all_genes += [{"genome": genome, "contig": cid, **g} for g in genes[cid]]
-        for r in (r for r in regions if r["genome"] == genome):
-            segs = parse_coordinates(r["coordinates"])
-            c = r["contig"]
-            res = nearest_trna(genes[c], segs[0][0], segs[-1][1], len(contigs[c]),
-                               c in circular, args.dist, dr.get(r["region_id"]))
-            rows.append({"region_id": r["region_id"], **res})
+    rows = []
+    for r in regions:
+        segs = parse_coordinates(r["coordinates"])
+        c = r["contig"]
+        if c in contig_info:
+            n, circ = contig_info[c]
+            res = nearest_trna(genes[c], segs[0][0], segs[-1][1], n, circ, args.dist,
+                               dr.get(r["region_id"]))
+        else:  # no tRNA predicted on this contig
+            res = nearest_trna([], 0, 0, 1, False, args.dist)
+        rows.append({"region_id": r["region_id"], **res})
 
-    write_tsv(out / "trnas.tsv", all_genes,
-              ["genome", "contig", "type", "name", "start", "end", "strand"])
     write_tsv(out / "trna.tsv", rows, ["region_id", "trna_adjacent", "trna_name", "trna_end",
                                        "trna_dist", "trna_dr_overlap"])
-    write_versions(out / "versions.txt", pyaragorn=pyaragorn.__version__,
-                   aragorn_settings="genetic code 11, tRNA + tmRNA",
-                   max_dist_bp=args.dist, dr_table=args.dr or "not used",
-                   seed="not applicable (deterministic)")
-    print(f"{len(all_genes)} tRNA/tmRNA genes; regions with an adjacent tRNA: "
+    with open(out / "versions.txt", "a") as fh:
+        fh.write(f"max_dist_bp: {args.dist}\ndr_table: {args.dr or 'not used'}\n")
+    print(f"regions with an adjacent tRNA: "
           f"{sum(r['trna_adjacent'] for r in rows)} of {len(rows)} -> {out / 'trna.tsv'}")
 
 

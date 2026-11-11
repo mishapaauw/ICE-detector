@@ -451,3 +451,12 @@ def test_merge_rgps_never_merges_origin_wrapping_rgp():
     pos = extract_regions.gene_positions(genes_on("c1", 60, "g"))
     rgps = [rgp("W", "g55", "g2", coords="5501..6000,1..300"), rgp("A", "g4", "g10")]
     assert merged(extract_regions.merge_rgps(rgps, pos, 3)) == [["W"], ["A"]]
+
+
+def test_merge_rgps_blocked_by_trna_in_gap():
+    pos = extract_regions.gene_positions(genes_on("c1", 60, "g"))
+    rgps = [{**rgp("A", "g0", "g9"), "start": "1", "stop": "1000"},
+            {**rgp("B", "g12", "g20"), "start": "1201", "stop": "2100"}]
+    assert merged(extract_regions.merge_rgps(rgps, pos, 3, {"c1": [(1050, 1125)]})) == [["A"], ["B"]]
+    assert merged(extract_regions.merge_rgps(rgps, pos, 3, {"c1": [(5000, 5075)]})) == [["A", "B"]]
+    assert merged(extract_regions.merge_rgps(rgps, pos, 3, {"c2": [(1050, 1125)]})) == [["A", "B"]]
