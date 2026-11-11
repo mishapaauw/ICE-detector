@@ -15,9 +15,11 @@ Steps (each writes its own subfolder with versions.txt):
     2. ppanggolin/          (run_ppanggolin.sh)
     3. regions/             (extract_regions.py)
     4. conjugation/         (detect_conjugation.sh + summarize_conjugation.py)
+    4b. integrase/          (detect_integrase.sh + summarize_integrase.py)
     5. orit/                (detect_orit.sh + summarize_orit.py)
     6. gc/                  (gc_content.py)
     6b. dr/                 (direct_repeats.py)
+    6c. trna/               (trna_proximity.py)
     7. final/               (build_table.py): ice_candidates.tsv, all_regions.tsv, ice_fasta/
 Reference data must be in db/ first (see db/README.md).
 """
@@ -54,13 +56,19 @@ def main():
                     help="folder containing the CONJScan model package")
     ap.add_argument("--skip-nhmmscan", action="store_true",
                     help="reuse existing <outdir>/orit/nhmmscan results")
+    ap.add_argument("--skip-hmmsearch", action="store_true",
+                    help="reuse existing <outdir>/integrase/hmmsearch results")
+    ap.add_argument("--integrase-hmm",
+                    default=str(SCRIPTS.parent / "db" / "pfam" / "integrase.hmm"))
+    ap.add_argument("--trna-dist", type=int, default=1000,
+                    help="max bp between a tRNA/tmRNA and a region end (default: 1000)")
     ap.add_argument("--orit-hmm", default=str(SCRIPTS.parent / "db" / "orit" / "oriT.hmm"))
     ap.add_argument("--orit-min-cov", type=float, default=0.7,
                     help="min fraction of the oriT profile a hit must cover (default: 0.7)")
     ap.add_argument("--orit-max-evalue", type=float, default=0.01,
                     help="max E-value for oriT hits (default: 0.01)")
     ap.add_argument("--min-evidence", type=int, default=2,
-                    help="min evidence count (of 5) for ice_candidates.tsv (default: 2)")
+                    help="min evidence count (of 7) for ice_candidates.tsv (default: 2)")
     ap.add_argument("--dr-outside", type=int, default=5000,
                     help="bp searched for direct repeats outside each region end (default: 5000)")
     ap.add_argument("--dr-inside", type=int, default=5000,
@@ -74,6 +82,7 @@ def main():
     ap.add_argument("--gc-z", type=float, default=2.0,
                     help="|GC z-score| counted as atypical GC (default: 2)")
     args = ap.parse_args()
+    preflight(args)
 
     out = Path(args.outdir)
     logs = out / "logs"
@@ -93,8 +102,26 @@ def main():
     print(f"[run_all] done: {out}/final/ice_candidates.tsv")
 
 
+def preflight(args):
+    """Fail early (before PPanGGOLiN) when inputs or reference data are missing."""
+    problems = []
+    if not Path(args.input_dir).is_dir():
+        problems.append(f"input folder not found: {args.input_dir}")
+    if not args.skip_macsyfinder and not (Path(args.models_dir) / "CONJScan").is_dir():
+        problems.append(f"CONJScan models not found in {args.models_dir} "
+                        "(msf_data install CONJScan==2.1.0 -t db/macsy_models)")
+    if not args.skip_nhmmscan and not Path(args.orit_hmm).is_file():
+        problems.append(f"oriT HMMs not found: {args.orit_hmm} "
+                        "(python scripts/download_orit_hmms.py -o db/orit)")
+    if not args.skip_hmmsearch and not Path(args.integrase_hmm).is_file():
+        problems.append(f"integrase HMMs not found: {args.integrase_hmm} "
+                        "(python scripts/download_pfam_hmms.py -o db/pfam)")
+    if problems:
+        sys.exit("[run_all] cannot start:\n  " + "\n  ".join(problems))
+
+
 def run_steps(args, out, logs, fasta_list, chrom_dir):
-    """Steps 1-6b; they read the genomes through fasta_list (copies in chrom_dir)."""
+    """Steps 1-6c; they read the genomes through fasta_list (copies in chrom_dir)."""
     py = sys.executable
     cmd = [py, SCRIPTS / "make_fasta_list.py", args.input_dir, "-o", fasta_list,
            "--chromosome-dir", chrom_dir, "--report", out / "input_contigs.tsv"]
@@ -119,6 +146,14 @@ def run_steps(args, out, logs, fasta_list, chrom_dir):
          "--tables", out / "ppanggolin" / "table", "--macsyfinder", conj / "macsyfinder",
          "-o", conj], logs / "summarize_conjugation.log")
 
+    integ = out / "integrase"
+    if not args.skip_hmmsearch:
+        run(["bash", SCRIPTS / "detect_integrase.sh", conj / "proteins", integ, args.cpu,
+             args.integrase_hmm], logs / "detect_integrase.log")
+    run([py, SCRIPTS / "summarize_integrase.py", "--regions", out / "regions" / "regions.tsv",
+         "--region-genes", out / "regions" / "region_genes.tsv",
+         "--hmmsearch", integ / "hmmsearch", "-o", integ], logs / "summarize_integrase.log")
+
     orit = out / "orit"
     if not args.skip_nhmmscan:
         run(["bash", SCRIPTS / "detect_orit.sh", fasta_list, orit, args.cpu, args.orit_hmm],
@@ -136,6 +171,10 @@ def run_steps(args, out, logs, fasta_list, chrom_dir):
          "--fasta-list", fasta_list, "-o", out / "dr", "--outside", args.dr_outside,
          "--inside", args.dr_inside, "--min-len", args.dr_min_len,
          "--max-copies", args.dr_max_copies], logs / "direct_repeats.log")
+
+    run([py, SCRIPTS / "trna_proximity.py", "--regions", out / "regions" / "regions.tsv",
+         "--fasta-list", fasta_list, "--dr", out / "dr" / "dr.tsv", "-o", out / "trna",
+         "--dist", args.trna_dist], logs / "trna_proximity.log")
 
 
 if __name__ == "__main__":

@@ -17,6 +17,10 @@ Approach (after Cury et al. 2017 and Ares-Arroyo et al. 2026; see [References](#
 2. Each region with at least `--min-orfs` genes is scored for:
    - a **conjugation system** (T4SS): MacSyFinder + CONJScan, chromosome models
    - a **relaxase** (MOB families, from the same CONJScan run)
+   - an **integrase**: tyrosine (Pfam PF00589) or serine (PF00239, PF07508)
+     recombinase, hmmsearch with Pfam gathering thresholds. DDE transposases
+     (PF00665) are reported but not counted: IS elements carry them everywhere
+     (193 hits in the 5 test genomes vs 58 tyrosine/serine recombinases)
    - an **origin of transfer (oriT)**: nhmmscan with oriT DNA profiles, filtered on
      E-value and on how much of the profile the hit covers
    - **GC content**: against the genome (z-score vs same-length windows) and
@@ -27,6 +31,10 @@ Approach (after Cury et al. 2017 and Ares-Arroyo et al. 2026; see [References](#
      same-strand repeat of ≥ 15 bp that occurs only at these two places in the
      genome. When found, the DR pair gives a refined element boundary
      (`element_start`/`element_end`)
+   - a **tRNA/tmRNA at a region end**: many ICEs integrate into the 3' end of a
+     tRNA or tmRNA gene. tRNAs are predicted with ARAGORN (pyaragorn); a region
+     counts when a tRNA lies within 1 kb (`--trna-dist`) of either end, or
+     overlaps one of the DR copies
 3. Evidence is combined into a table with a category (following Ares-Arroyo et
    al. 2026) and an evidence count:
 
@@ -66,6 +74,7 @@ Download the reference data once (stored in `db/`, not tracked by git; see `db/R
 ```bash
 msf_data install CONJScan==2.1.0 -t db/macsy_models
 python scripts/download_orit_hmms.py -o db/orit
+python scripts/download_pfam_hmms.py -o db/pfam
 ```
 
 ## Usage
@@ -80,7 +89,7 @@ python scripts/run_all.py data/test -o results/test --cpu 8
 | Option | Default | Meaning |
 |---|---|---|
 | `--min-orfs` | 10 | keep only regions with at least this many genes |
-| `--min-evidence` | 2 | minimum evidence count (of 5) for `ice_candidates.tsv` |
+| `--min-evidence` | 2 | minimum evidence count (of 7) for `ice_candidates.tsv` |
 | `--orit-min-cov` | 0.7 | an oriT hit must cover this fraction of its HMM profile |
 | `--orit-max-evalue` | 0.01 | maximum E-value of an oriT hit |
 | `--gc-flank` | 35000 | bp up- and downstream used for flank GC |
@@ -88,8 +97,9 @@ python scripts/run_all.py data/test -o results/test --cpu 8
 | `--dr-outside`, `--dr-inside` | 5000, 5000 | bp searched for DRs outside / inside each region end |
 | `--dr-min-len` | 15 | minimum DR length (as in Ares-Arroyo et al. 2026) |
 | `--dr-max-copies` | 2 | max genome-wide copies of a DR (versions trimmed by ≤ 2 bp per end may have one more) |
+| `--trna-dist` | 1000 | bp between a tRNA/tmRNA and a region end |
 | `--linear` | off | treat contigs as linear (default: circular) |
-| `--skip-ppanggolin`, `--skip-macsyfinder`, `--skip-nhmmscan` | off | reuse earlier tool output (e.g. to change only the filters) |
+| `--skip-ppanggolin`, `--skip-macsyfinder`, `--skip-nhmmscan`, `--skip-hmmsearch` | off | reuse earlier tool output (e.g. to change only the filters) |
 
 ## Input genomes
 
@@ -133,16 +143,20 @@ Key columns:
 | `spot_id`, `spot_n_genomes` | PPanGGOLiN spot, and how many genomes have a region in it (spot labels change between runs; compare runs on `region_id`) |
 | `category` | `ICE`, `dICE`, `IME`, `iOriT`, `ICE_noOriT`, `dICE_noOriT`, `IME_noOriT`, `other`, `none` (see table above) |
 | `mobility_genes` | what was found, joined by `+`: `T4SS`, `dCONJ`, `MOB` (relaxase), `oriT`; e.g. `T4SS+MOB` = ICE without a detected oriT |
-| `evidence_count` | number of: `t4ss`, `relaxase`, `orit`, `gc_atypical`, `dr` |
+| `evidence_count` | number of: `t4ss`, `relaxase`, `orit`, `integrase`, `trna`, `gc_atypical`, `dr` |
 | `element_start`, `element_end` | outer edges of the DR pair (refined boundaries), if a DR was found |
 | `dr_length`, `dr_seq`, `dr_left_offset`, `dr_right_offset` | the DR, and how far each copy lies from the region end (negative = outside the region) |
 | `conj_systems` | e.g. `T4SS_typeG:…(21/21)`: system genes inside the region / total |
 | `relaxase_types`, `orit_profiles` | MOB families; oriT profiles hit (best E-value) |
+| `integrase_types`, `n_integrases`, `integrase_end_dist` | `Tyr` / `Ser` recombinases in the region, how many, and bp from the closest one to a region end |
+| `dde_transposase` | DDE transposase (Pfam rve) in the region; information only, not evidence |
+| `trna_name`, `trna_end`, `trna_dist`, `trna_dr_overlap` | nearest tRNA/tmRNA (e.g. `tRNA-Gly(gcc)`), which end (`left`/`right`), distance in bp, and whether it overlaps a DR copy |
 | `region_gc`, `genome_gc`, `gc_diff`, `gc_zscore` | GC vs the whole genome |
 | `flank_up_gc`, `flank_down_gc`, `flank_gc`, `gc_diff_flank` | GC vs the flanking DNA |
 
 Intermediate results are kept per step: `ppanggolin/`, `regions/` (per-region FASTA),
-`conjugation/`, `orit/`, `gc/`, `dr/`, each with its own `versions.txt`. Also in
+`conjugation/`, `integrase/`, `orit/`, `gc/`, `dr/`, `trna/`, each with its own
+`versions.txt`. `trna/trnas.tsv` lists every predicted tRNA/tmRNA. Also in
 `<outdir>`: `input_contigs.tsv` (see [Input genomes](#input-genomes)) and
 `genomes.fasta.list` (the PPanGGOLiN input; it points to the temporary copies,
 which no longer exist after the run).
@@ -178,6 +192,9 @@ pytest -m slow   # full pipeline on data/test vs tests/expected/test_candidates.
 - DR + atypical GC also occurs in elements without mobility genes (e.g. prophages
   or other genomic islands). These are kept out of `ice_candidates.tsv` (a
   mobility marker is required) but remain in `all_regions.tsv`.
+- Integrase and tRNA evidence are also found in prophages and other islands; like
+  GC and DRs they only support a call that has a mobility marker. Integrases of
+  the DDE type (some ICE families) are not counted.
 - MacSyFinder can attach a relaxase far from its T4SS (relaxases are "loners" in
   CONJScan); the `(n/total)` counts in `conj_systems` show such partial overlaps.
 
@@ -190,8 +207,9 @@ pytest -m slow   # full pipeline on data/test vs tests/expected/test_candidates.
   minimal hitchers of conjugative elements. *bioRxiv* (v2).
   doi:10.64898/2026.01.13.699239. Source of the ICE / dICE / IME / iOriT categories
   and of the 15 bp minimum DR length.
-- Tools: PPanGGOLiN, MacSyFinder with CONJScan models, HMMER; oriT HMM profiles from
-  figshare doi:10.6084/m9.figshare.31047685 (see `db/README.md`).
+- Tools: PPanGGOLiN, MacSyFinder with CONJScan models, HMMER, ARAGORN (pyaragorn);
+  oriT HMM profiles from figshare doi:10.6084/m9.figshare.31047685; Pfam profiles
+  for integrases (see `db/README.md`).
 
 ## Layout
 

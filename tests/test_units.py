@@ -278,3 +278,130 @@ def test_dr_copies_matches_brute_force(seq):
               + seq[2:] + random_dna(1000, 7) + seq[:-1] + random_dna(500, 8))
     assert direct_repeats.dr_copies(seq, [genome]) == brute_copies(seq, genome)
 
+
+# --- summarize_integrase ----------------------------------------------------------------
+
+import summarize_integrase
+import trna_proximity
+
+
+def domtbl_line(gene, profile, acc, evalue, ievalue):
+    # target acc tlen query acc qlen E score bias # of c-E i-E dscore dbias
+    # hmm_from hmm_to ali_from ali_to env_from env_to acc description
+    return (f"{gene} - 300 {profile} {acc} 170 {evalue} 50.0 0.1 1 1 {ievalue} {ievalue} "
+            f"50.0 0.1 1 160 10 170 5 175 0.95 -\n")
+
+
+def test_integrase_roles_regions_and_end_distance(tmp_path):
+    tbl = tmp_path / "g1.domtbl"
+    tbl.write_text("# header\n"
+                   + domtbl_line("gA", "Phage_integrase", "PF00589.28", 1e-30, 1e-30)
+                   + domtbl_line("gA", "Phage_integrase", "PF00589.28", 1e-30, 1e-5)  # 2nd domain
+                   + domtbl_line("gB", "rve", "PF00665.34", 1e-20, 1e-20)
+                   + domtbl_line("gC", "Resolvase", "PF00239.28", 1e-20, 1e-20)
+                   + domtbl_line("gX", "Phage_integrase", "PF00589.28", 1e-30, 1e-30))  # no region
+    hits = summarize_integrase.read_domtbl(tbl)
+    assert len(hits) == 4                                   # best domain per gene x profile
+    regions = [{"region_id": "R1", "coordinates": "1000..1999", "length": "1000"},
+               {"region_id": "R2", "coordinates": "5000..5999", "length": "1000"}]
+    genes = [{"region_id": "R1", "gene": "gA", "start": "1500", "stop": "1800"},  # 199 bp to end
+             {"region_id": "R2", "gene": "gB", "start": "5000", "stop": "5300"},
+             {"region_id": "R2", "gene": "gC", "start": "5010", "stop": "5300"}]  # 10 bp to start
+    rows = {r["region_id"]: r for r in summarize_integrase.summarize(regions, genes, hits)}
+    assert rows["R1"]["integrase"] and rows["R1"]["integrase_types"] == "Tyr"
+    assert rows["R1"]["integrase_end_dist"] == 199 and not rows["R1"]["dde_transposase"]
+    assert rows["R2"]["integrase_types"] == "Ser" and rows["R2"]["dde_transposase"]
+    assert rows["R2"]["integrase_end_dist"] == 10
+    assert {h["gene"]: h["region_id"] for h in hits}["gX"] == ""
+
+
+def test_integrase_dde_alone_is_not_integrase():
+    hits = [{"gene": "g", "accession": "PF00665"}]
+    rows = summarize_integrase.summarize(
+        [{"region_id": "R", "coordinates": "1..100", "length": "100"}],
+        [{"region_id": "R", "gene": "g", "start": "1", "stop": "90"}], hits)
+    assert not rows[0]["integrase"] and rows[0]["dde_transposase"]
+
+
+def test_end_distance_in_region_wrapping_origin():
+    segs = [(9001, 10000), (1, 500)]                       # 1500 bp, wraps the origin
+    assert summarize_integrase.end_distance({"start": "400", "stop": "450"}, segs, 1500) == 50
+    assert summarize_integrase.end_distance({"start": "9100", "stop": "9200"}, segs, 1500) == 99
+
+
+# --- trna_proximity ---------------------------------------------------------------------
+
+TRNA = {"type": "tRNA", "name": "tRNA-Gly(gcc)", "start": 1000, "end": 1075, "strand": "+"}
+
+
+def test_trna_near_region_end():
+    res = trna_proximity.nearest_trna([TRNA], 1300, 50000, 100000, False, 1000)
+    assert res["trna_adjacent"] and res["trna_end"] == "left" and res["trna_dist"] == 225
+    far = trna_proximity.nearest_trna([TRNA], 3000, 50000, 100000, False, 1000)
+    assert not far["trna_adjacent"]
+
+
+def test_trna_overlapping_dr_counts_even_if_far():
+    dr = {"dr": "True", "dr_left_start": "1060", "dr_left_end": "1074",
+          "dr_right_start": "60000", "dr_right_end": "60014"}
+    res = trna_proximity.nearest_trna([TRNA], 3000, 50000, 100000, False, 1000, dr)
+    assert res["trna_adjacent"] and res["trna_dr_overlap"]
+
+
+def test_trna_distance_wraps_circular_contig():
+    t = {**TRNA, "start": 99900, "end": 99975}
+    assert trna_proximity.nearest_trna([t], 100, 5000, 100000, True, 1000)["trna_adjacent"]
+    assert not trna_proximity.nearest_trna([t], 100, 5000, 100000, False, 1000)["trna_adjacent"]
+
+
+# --- build_table end to end on tiny tables ---------------------------------------------
+
+def test_build_table_counts_seven_evidence_items(tmp_path):
+    res = tmp_path / "run"
+    def tsv(rel, rows):
+        path = res / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        pd.DataFrame(rows).to_csv(path, sep="\t", index=False)
+    rid = ["R1", "R2"]
+    tsv("regions/regions.tsv", [{"region_id": r, "spot_id": "spot_1", "genome": "g", "contig": "c",
+                                 "start": 1, "end": 100, "length": 100, "n_orfs": 10,
+                                 "coordinates": "1..100", "contig_border": False,
+                                 "whole_contig": False} for r in rid])
+    tsv("conjugation/conjugation.tsv", [
+        {"region_id": "R1", "conj_system": True, "conj_systems": "x", "dconj_system": False,
+         "dconj_systems": "", "relaxase": True, "relaxase_types": "MOBH", "t4cp": True,
+         "virb4": True, "n_conj_hits": 20},
+        {"region_id": "R2", "conj_system": False, "conj_systems": "", "dconj_system": False,
+         "dconj_systems": "", "relaxase": False, "relaxase_types": "", "t4cp": False,
+         "virb4": False, "n_conj_hits": 0}])
+    tsv("orit/orit.tsv", [{"region_id": r, "orit": r == "R1", "n_orit_hits": 1,
+                           "orit_profiles": "", "orit_best_evalue": ""} for r in rid])
+    tsv("gc/gc.tsv", [{"region_id": r, "region_gc": .5, "genome_gc": .6, "gc_diff": -.1,
+                       "gc_zscore": -3 if r == "R1" else 0, "flank_up_gc": .6,
+                       "flank_down_gc": .6, "flank_gc": .6, "gc_diff_flank": -.1} for r in rid])
+    tsv("dr/dr.tsv", [{**dict.fromkeys(direct_repeats.FIELDS), "region_id": r, "dr": r == "R1"}
+                      for r in rid])
+    tsv("integrase/integrase.tsv", [{"region_id": r, "integrase": True, "integrase_types": "Tyr",
+                                     "n_integrases": 1, "integrase_end_dist": 0,
+                                     "dde_transposase": False} for r in rid])
+    tsv("trna/trna.tsv", [{"region_id": r, "trna_adjacent": r == "R1", "trna_name": "",
+                           "trna_end": "", "trna_dist": None, "trna_dr_overlap": False}
+                          for r in rid])
+    tsv("ppanggolin/spots.tsv", [{"spot_id": "spot_1", "rgp_id": r} for r in rid])
+    tsv("ppanggolin/regions_of_genomic_plasticity.tsv", [{"region": r, "genome": "g"} for r in rid])
+    (res / "regions/fasta").mkdir()
+    for r in rid:
+        (res / "regions/fasta" / f"{r}.fasta").write_text(f">{r}\nACGT\n")
+
+    import sys
+    argv = sys.argv
+    sys.argv = ["build_table.py", "--results", str(res)]
+    try:
+        build_table.main()
+    finally:
+        sys.argv = argv
+    out = pd.read_csv(res / "final/all_regions.tsv", sep="\t").set_index("region_id")
+    assert out.loc["R1", "evidence_count"] == 7 and out.loc["R1", "category"] == "ICE"
+    assert out.loc["R2", "evidence_count"] == 1 and out.loc["R2", "category"] == "none"
+    cand = pd.read_csv(res / "final/ice_candidates.tsv", sep="\t")
+    assert cand["region_id"].tolist() == ["R1"]   # R2: integrase only, no mobility marker

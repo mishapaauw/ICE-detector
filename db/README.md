@@ -14,3 +14,11 @@ Everything in `db/` except this file is downloaded and gitignored.
 - Version: figshare v1 (doi 10.6084/m9.figshare.31047685.v1), 129 DNA profiles
 - Download + MD5 check + concatenate: `python scripts/download_orit_hmms.py -o db/orit`
 - `detect_orit.sh` runs `hmmpress` on `db/orit/oriT.hmm` if needed
+
+## Pfam integrase/recombinase profiles — `db/pfam/`
+- Source: InterPro API (https://www.ebi.ac.uk/interpro/api/), Pfam release recorded
+  in `db/pfam/manifest.tsv` (39.0 when first downloaded, 2026-11-11)
+- Profiles: PF00589 Phage_integrase (Tyr), PF00239 Resolvase (Ser),
+  PF07508 Recombinase (Ser), PF00665 rve (DDE, reported only)
+- Download + concatenate + hmmpress: `python scripts/download_pfam_hmms.py -o db/pfam`
+- Searched with `hmmsearch --cut_ga` (Pfam gathering thresholds)

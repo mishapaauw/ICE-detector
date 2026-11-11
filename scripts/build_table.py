@@ -5,9 +5,12 @@ Per region (RGP with >= --min-orfs genes), evidence is:
   t4ss       conjugation system (CONJScan T4SS model, >= 50% of its genes in region)
   relaxase   MOB relaxase gene in the region
   orit       oriT hit passing the E-value and profile-coverage filters
+  integrase  tyrosine or serine recombinase (Pfam, --cut_ga) in the region
+  trna       tRNA/tmRNA gene next to a region end or overlapping a DR copy
   gc         atypical GC: |gc_zscore| >= --gc-z (default 2)
   dr         direct repeats (putative attL/attR) found at both region ends
-evidence_count = number of these five that are True.
+evidence_count = number of these seven that are True (categories use only
+oriT, relaxase and conjugation system).
 
 category (from oriT, relaxase and conjugation system):
   ICE    oriT + relaxase + complete conjugation system (T4SS model)
@@ -43,6 +46,7 @@ import pandas as pd
 
 from common import write_versions
 
+EVIDENCE = ["t4ss", "relaxase", "orit", "integrase", "trna", "gc_atypical", "dr"]
 CATEGORY_ORDER = {"ICE": 0, "dICE": 1, "IME": 2, "iOriT": 3, "ICE_noOriT": 4,
                   "dICE_noOriT": 5, "IME_noOriT": 6, "other": 7, "none": 8}
 
@@ -78,7 +82,8 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--results", required=True,
-                    help="run folder containing ppanggolin/, regions/, conjugation/, orit/, gc/")
+                    help="run folder containing ppanggolin/, regions/, conjugation/, integrase/, "
+                         "orit/, gc/, dr/, trna/")
     ap.add_argument("-o", "--outdir", help="default: <results>/final")
     ap.add_argument("--min-evidence", type=int, default=2,
                     help="min evidence_count for ice_candidates.tsv (default: 2)")
@@ -95,22 +100,29 @@ def main():
     orit = pd.read_csv(res / "orit" / "orit.tsv", sep="\t")
     gc = pd.read_csv(res / "gc" / "gc.tsv", sep="\t")
     dr = pd.read_csv(res / "dr" / "dr.tsv", sep="\t")
+    integ = pd.read_csv(res / "integrase" / "integrase.tsv", sep="\t")
+    trna = pd.read_csv(res / "trna" / "trna.tsv", sep="\t")
 
     df = (regions.merge(conj, on="region_id", how="left", validate="1:1")
                  .merge(orit, on="region_id", how="left", validate="1:1")
                  .merge(gc, on="region_id", how="left", validate="1:1")
-                 .merge(dr, on="region_id", how="left", validate="1:1"))
+                 .merge(dr, on="region_id", how="left", validate="1:1")
+                 .merge(integ, on="region_id", how="left", validate="1:1")
+                 .merge(trna, on="region_id", how="left", validate="1:1"))
     if len(df) != len(regions):
         sys.exit("Region tables do not match; re-run upstream steps.")
 
     df = df.rename(columns={"conj_system": "t4ss"})
-    for col in ("t4ss", "dconj_system", "relaxase", "orit", "t4cp", "virb4", "dr"):
+    df = df.rename(columns={"trna_adjacent": "trna"})
+    for col in ("t4ss", "dconj_system", "relaxase", "orit", "t4cp", "virb4", "dr",
+                "integrase", "dde_transposase", "trna", "trna_dr_overlap"):
         df[col] = df[col].fillna(False).astype(bool)
     df["gc_atypical"] = df["gc_zscore"].abs() >= args.gc_z
-    df["evidence_count"] = df[["t4ss", "relaxase", "orit", "gc_atypical", "dr"]].sum(axis=1)
+    df["evidence_count"] = df[EVIDENCE].sum(axis=1)
     for col in ("dr_length", "dr_genome_copies", "dr_left_offset", "dr_right_offset",
                 "dr_left_start", "dr_left_end", "dr_right_start", "dr_right_end",
-                "element_start", "element_end"):
+                "element_start", "element_end", "n_integrases", "integrase_end_dist",
+                "trna_dist"):
         df[col] = df[col].astype("Int64")
     df["category"] = df.apply(classify, axis=1)
     df["mobility_genes"] = df.apply(mobility_genes, axis=1)
@@ -121,10 +133,12 @@ def main():
 
     cols = ["region_id", "genome", "contig", "start", "end", "length", "n_orfs",
             "spot_id", "spot_n_genomes", "category", "mobility_genes", "evidence_count",
-            "t4ss", "relaxase", "orit", "gc_atypical", "dr",
+            *EVIDENCE,
             "element_start", "element_end",
             "conj_systems", "dconj_systems", "relaxase_types", "t4cp", "virb4",
-            "orit_profiles", "orit_best_evalue", "region_gc", "genome_gc", "gc_diff",
+            "orit_profiles", "orit_best_evalue",
+            "integrase_types", "n_integrases", "integrase_end_dist", "dde_transposase",
+            "trna_name", "trna_end", "trna_dist", "trna_dr_overlap", "region_gc", "genome_gc", "gc_diff",
             "gc_zscore", "flank_up_gc", "flank_down_gc", "flank_gc", "gc_diff_flank",
             "dr_length", "dr_seq", "dr_genome_copies", "dr_left_start", "dr_left_end",
             "dr_right_start", "dr_right_end", "dr_left_offset", "dr_right_offset",
@@ -148,7 +162,8 @@ def main():
     write_versions(out / "versions.txt", pandas=pd.__version__, gc_z=args.gc_z,
                    min_evidence=args.min_evidence)
     with open(out / "versions.txt", "a") as fh:
-        for step in ("ppanggolin", "regions", "conjugation", "orit", "gc", "dr"):
+        for step in ("ppanggolin", "regions", "conjugation", "integrase", "orit", "gc", "dr",
+                     "trna"):
             v = res / step / "versions.txt"
             if v.exists():
                 fh.write(f"\n## {step}\n{v.read_text()}")
